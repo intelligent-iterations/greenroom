@@ -26,6 +26,40 @@ const buffer: DiagnosticEvent[] = [];
 /** Set true to mirror events to the console; off by default to keep it quiet. */
 let echo = false;
 
+const STORAGE_KEY = 'greenroom.diagnostics.last';
+
+/**
+ * Mirrors the buffer to localStorage, throttled.
+ *
+ * A live session's log is evidence about something that already happened, and
+ * reloading the page previously destroyed it — which cost us the record of a
+ * real failure a tester had just reproduced. Throttled because writing on every
+ * event would put JSON serialisation on the path of the loop it observes.
+ */
+let lastPersist = 0;
+const PERSIST_INTERVAL_MS = 2000;
+
+function persist(): void {
+  const now = performance.now();
+  if (now - lastPersist < PERSIST_INTERVAL_MS) return;
+  lastPersist = now;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buffer));
+  } catch {
+    // Private browsing or quota. In-memory buffer still works.
+  }
+}
+
+/** The log from the previous page load, if there was one. */
+export function previousEvents(): DiagnosticEvent[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as DiagnosticEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function logEvent(event: string, data?: Record<string, unknown>): void {
   const entry: DiagnosticEvent = {
     t: Math.round(performance.now() - started),
@@ -35,6 +69,7 @@ export function logEvent(event: string, data?: Record<string, unknown>): void {
   buffer.push(entry);
   if (buffer.length > CAPACITY) buffer.shift();
   if (echo) console.log(`[greenroom +${entry.t}ms] ${event}`, data ?? '');
+  persist();
 }
 
 export function getEvents(): DiagnosticEvent[] {
@@ -60,10 +95,17 @@ declare global {
       events: () => DiagnosticEvent[];
       text: () => string;
       echo: (on: boolean) => void;
+      /** The log from the previous page load, which a reload used to destroy. */
+      previous: () => DiagnosticEvent[];
     };
   }
 }
 
 if (typeof window !== 'undefined') {
-  window.__GREENROOM__ = { events: getEvents, text: formatEvents, echo: setEcho };
+  window.__GREENROOM__ = {
+    events: getEvents,
+    text: formatEvents,
+    echo: setEcho,
+    previous: previousEvents,
+  };
 }

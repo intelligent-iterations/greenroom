@@ -73,6 +73,26 @@ const MID_SESSION_FEEDBACK = [
   /\bout of (?:five|ten|5|10)\b/i,
 ];
 
+/**
+ * Assistant-speak. An interviewer never offers to help.
+ *
+ * This is the register a general-purpose model falls back into when it loses
+ * the role, and it is the failure a live test surfaced that every existing
+ * check missed: the turns were clean, short, well-formed prose that simply were
+ * not an interview.
+ */
+const ASSISTANT_VOICE = [
+  /\bhow can I (?:help|assist)\b/i,
+  /\bI(?:'m| am) here to (?:help|assist)\b/i,
+  /\bfeel free to\b/i,
+  /\blet me know if\b/i,
+  /\bis there anything else\b/i,
+  /\bI hope (?:this|that) helps\b/i,
+  /\bhappy to help\b/i,
+  /\bthanks for sharing\b/i,
+  /\bgreat question\b/i,
+];
+
 /** Spoken-word ceiling. Past this a turn stops being a question and becomes a speech. */
 const MAX_SPOKEN_WORDS = 75;
 
@@ -80,7 +100,55 @@ function check(name: string, passed: boolean, detail: string, critical = false):
   return { check: name, passed, detail: passed ? '' : detail, critical };
 }
 
-export function runChecks(turn: string, scenario: InterviewScenario): CheckResult[] {
+/**
+ * Conversation context, for the checks that cannot be decided from one turn.
+ *
+ * "Is this turn echoing the candidate?" and "has it asked this already?" are
+ * both mechanical, but only against what came before.
+ */
+export interface CheckContext {
+  /** Interviewer turns already spoken this session, oldest first. */
+  previousInterviewerTurns?: string[];
+  /** What the candidate said immediately before this turn. */
+  lastCandidateAnswer?: string;
+}
+
+/** Content words, lowercased, for overlap comparisons. */
+function contentWords(text: string): Set<string> {
+  const stop = new Set([
+    'the','a','an','and','or','but','if','of','to','in','on','at','for','with','was','were','is',
+    'are','it','that','this','you','your','i','we','they','he','she','my','me','so','as','be','been',
+    'had','has','have','do','did','does','what','how','when','why','about','from','there','their',
+  ]);
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stop.has(w)),
+  );
+}
+
+/** Jaccard overlap of content words, 0..1. */
+function overlap(a: string, b: string): number {
+  const setA = contentWords(a);
+  const setB = contentWords(b);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let shared = 0;
+  for (const word of setA) if (setB.has(word)) shared += 1;
+  return shared / Math.min(setA.size, setB.size);
+}
+
+/** Above this, a turn is restating rather than interviewing. */
+const ECHO_THRESHOLD = 0.7;
+/** Above this, a turn is asking something already asked. */
+const REPEAT_THRESHOLD = 0.8;
+
+export function runChecks(
+  turn: string,
+  scenario: InterviewScenario,
+  context: CheckContext = {},
+): CheckResult[] {
   const results: CheckResult[] = [];
   const text = turn.trim();
 
@@ -101,6 +169,39 @@ export function runChecks(turn: string, scenario: InterviewScenario): CheckResul
   results.push(
     check('single_question', questions <= 1, `asks ${questions} questions in one turn`),
   );
+
+  // The check that was missing. An interviewer interviews; a turn that asks
+  // nothing has stopped doing the job, however well-formed it is. Critical,
+  // because a session of statements is not an interview at all.
+  results.push(
+    check('asks_a_question', questions >= 1, 'the turn asks nothing', true),
+  );
+
+  const assistant = ASSISTANT_VOICE.filter((p) => p.test(text));
+  results.push(
+    check('interviewer_register', assistant.length === 0, 'slips into assistant voice', true),
+  );
+
+  if (context.lastCandidateAnswer) {
+    const echo = overlap(text, context.lastCandidateAnswer);
+    results.push(
+      check(
+        'not_echoing',
+        echo < ECHO_THRESHOLD,
+        `restates the candidate's own answer (${echo.toFixed(2)} overlap)`,
+      ),
+    );
+  }
+
+  for (const previous of context.previousInterviewerTurns ?? []) {
+    const repeat = overlap(text, previous);
+    if (repeat >= REPEAT_THRESHOLD) {
+      results.push(
+        check('not_repeating', false, `repeats an earlier question (${repeat.toFixed(2)} overlap)`),
+      );
+      break;
+    }
+  }
 
   const leaks = LEAKAGE.filter((p) => p.test(text));
   results.push(

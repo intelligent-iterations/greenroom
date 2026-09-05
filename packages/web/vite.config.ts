@@ -40,6 +40,7 @@ export default defineConfig({
         diag: 'diag.html',
         vadcheck: 'vadcheck.html',
         probe: 'probe.html',
+        evals: 'evals.html',
       },
     },
   },

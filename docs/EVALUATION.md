@@ -109,6 +109,58 @@ catches a regression in the prompt compiler or the checks. It cannot catch a
 model regression, because the model is not being run. Only `--record` against a
 live backend, followed by `--write-baseline`, produces a suite that does that.
 
+## Scoring the model that actually ships
+
+The offline harness scores vendor models over HTTP. It cannot reach the
+on-device model — which is the one learners use — so for a long time the suite
+was grading something the product does not run.
+
+`packages/web/evals.html` closes that gap. It executes the same cases through
+the same `runChecks` from `@greenroom/shared`, in the browser, against the
+on-device model with the prompt the session actually compiles:
+
+```bash
+pnpm --filter @greenroom/web build
+pnpm --filter @greenroom/web exec vite preview --port 5179
+node packages/web/scripts/collect-results.mjs     # optional, writes results to disk
+# open http://localhost:5179/evals.html?style=compact
+```
+
+The tab must be visible; a backgrounded tab is throttled and the run crawls.
+Results stream to the collector and persist to localStorage, readable later with
+`?view=1`. Both exist because reading a long GPU run through a browser debugger
+lost two completed runs.
+
+### What it caught
+
+A tester reported the interviewer "wasn't able to roleplay as an interviewer".
+The checks at the time all passed, because they verified a turn had **at most**
+one question and never that it had **at least** one. A model that stops
+interviewing and starts making pleasant statements scored clean.
+
+Adding `asks_a_question` and `interviewer_register` turned that into a number:
+
+| | Before | After |
+|---|---|---|
+| Clean pass rate | 0.53 | **0.73** |
+| Critical failures | 7 | **4** |
+| Turns asking nothing | 7 | **3** |
+| Repeated questions | 3 | **0** |
+
+Two fixes produced the difference, and it is worth separating them:
+
+- **A real prompt fix.** The compact prompt had "ask one short question" as line
+  two of seven. Small models weight the end of a prompt most, so the single
+  non-negotiable output constraint moved last and was rewritten to describe the
+  whole reply rather than a property of it.
+- **A harness bug.** The runner always steered to `requiredQuestions[0]`,
+  including for cases whose transcript had already asked it — then scored the
+  result as a repeat. Three of the failures were manufactured by the harness.
+  Worth stating plainly: part of a bad score was the measurement, not the model.
+
+Three turns in fifteen still ask nothing. That is the next thing to fix, and it
+is now a number rather than an impression.
+
 ## Quality gates
 
 `evals/src/gate.ts`.

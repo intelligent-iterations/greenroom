@@ -53,5 +53,14 @@ for (const [dir, file] of wanted) {
   await copyFile(join(dir, file), join(target, file));
 }
 
+// The eval runner fetches the same JSONL the offline harness reads, so the two
+// score identical cases rather than two copies that drift.
+const datasets = new URL('../../../evals/datasets/', import.meta.url).pathname;
+const evalTarget = new URL('../public/evals/', import.meta.url).pathname;
+await mkdir(evalTarget, { recursive: true });
+for (const file of await readdir(datasets)) {
+  if (file.endsWith('.jsonl')) await copyFile(join(datasets, file), join(evalTarget, file));
+}
+
 console.log(`copied ${wanted.length} VAD runtime assets to public/vad/`);
 for (const [, file] of wanted) console.log(`  ${file}`);

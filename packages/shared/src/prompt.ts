@@ -24,7 +24,7 @@ import {
  * version in its report and the CI gate compares against the baseline captured
  * under the previous version.
  */
-export const PROMPT_VERSION = '2026-09-05.4';
+export const PROMPT_VERSION = '2026-09-05.5';
 
 /**
  * CEFR governs *how* the interviewer speaks. It deliberately does not govern
@@ -175,15 +175,23 @@ function compileCompactPrompt(input: CompileInput): CompiledPrompt {
   const question = input.nextQuestion ?? scenario.requiredQuestions[0] ?? '';
   const lang = scenario.language === 'fr' ? 'Reply in French only.' : '';
 
+  // Ordering is load-bearing. Small models weight the end of a prompt most, so
+  // the single non-negotiable output constraint goes last and describes the
+  // WHOLE reply, not a property of it. An earlier version put "ask one short
+  // question" second of seven lines and measured 7 of 15 turns asking nothing
+  // at all — fluent, in-character, and not an interview.
   const system = [
     `You are ${scenario.interviewerPersona} at ${scenario.company}. You are interviewing a candidate for a ${scenario.role} job.`,
-    `Ask exactly ONE short question, then stop. Under 40 words. Plain spoken words only, no lists, no symbols. ${lang}`.trim(),
     CEFR_BRIEF[learner.cefr],
     SENIORITY_BRIEF[scenario.seniority],
-    `Never answer your own question. Never say what a good answer contains. Never give feedback or scores.`,
-    `If their last answer was vague, ask for the specific detail instead of moving on.`,
-    `Ask about this next: ${question}`,
-  ].join('\n');
+    `Never answer your own question. Never say what a good answer contains. Never give feedback, scores or praise.`,
+    `If their last answer was vague, ask for the missing specific instead of moving on.`,
+    lang,
+    `Your entire reply must be ONE short question, under 30 words, ending in a question mark. Nothing else — no greeting, no comment on their answer.`,
+    `Ask about: ${question}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   return { version: PROMPT_VERSION, system, focus };
 }
