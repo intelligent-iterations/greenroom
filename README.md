@@ -25,6 +25,7 @@ conversation with anyone reviewing data residency.
 - [Pedagogical calibration](#pedagogical-calibration)
 - [Model portability](#model-portability)
 - [Evaluation harness](#evaluation-harness)
+- [Infrastructure and deployment](#infrastructure-and-deployment)
 - [Project status: what is verified and what is not](#project-status-what-is-verified-and-what-is-not)
 - [Repository map](#repository-map)
 
@@ -282,6 +283,48 @@ pnpm --filter @greenroom/evals exec node --experimental-strip-types \
 Full detail, including how to calibrate the judge against human raters, is in
 [docs/EVALUATION.md](docs/EVALUATION.md).
 
+## Infrastructure and deployment
+
+The backend is a Firebase project, split between two tools by cadence:
+
+**Terraform/OpenTofu (`infra/`)** owns the durable things — the project, billing
+linkage, enabled APIs, the auth configuration, the web app registration, and the
+Firestore database.
+
+**Firebase CLI** owns the things that change with the code — Cloud Functions,
+hosting bundles, and security rules.
+
+The deciding argument for putting infrastructure in code here is one resource: a
+**Firestore database's location is permanent**. This product's posture is that
+anything not on the learner's device stays in Canada, and that claim is worth
+more as a reviewable line in `infra/main.tf` than as a dropdown someone picked
+once. `northamerica-northeast1` is Montreal.
+
+```bash
+cd infra
+cp terraform.tfvars.example terraform.tfvars   # org id + billing account
+tofu init && tofu apply
+tofu -chdir=infra output -raw web_env > ../packages/web/.env
+```
+
+Then, from the root:
+
+```bash
+firebase deploy --only firestore                 # rules and indexes
+pnpm --filter @greenroom/functions build         # bundles, see below
+firebase deploy --only functions
+```
+
+One wrinkle worth knowing about: `packages/functions` depends on
+`@greenroom/shared` through pnpm's `workspace:*` protocol, which Firebase's
+deploy-time `npm install` cannot resolve. The build bundles the shared package
+in with esbuild and keeps `firebase-functions`, `firebase-admin` and `zod`
+external, so the deployed `package.json` lists only dependencies npm can
+actually install.
+
+Full detail in [infra/README.md](infra/README.md); the reasoning is in
+[ADR 0004](docs/adr/0004-terraform-for-infrastructure.md).
+
 ## Project status: what is verified and what is not
 
 This is a portfolio build, and I would rather be precise about its edges than
@@ -301,6 +344,10 @@ have you find them.
   from 9.5 MB to 819 KB; Whisper, WebLLM and Kokoro load only when a session
   actually starts.
 - The eval harness runs end to end and produces a gated report.
+- The infrastructure is real and applied: `tofu apply` created the project,
+  Firestore in Montreal with delete protection and point-in-time recovery,
+  anonymous auth, and the web app registration. `firebase deploy --only firestore`
+  compiled and released the security rules against it.
 
 **Not verified — be appropriately sceptical:**
 
@@ -319,8 +366,10 @@ have you find them.
   can be run and reviewed offline with no vendor account. `--record` against a
   live backend replaces them, and only then does the suite catch model
   regressions rather than just prompt and check regressions.
-- The Cloud Functions are written and typecheck but have not been deployed to a
-  live Firebase project.
+- **End-to-end behaviour against the live backend is untested.** The rules are
+  deployed and the functions are built and bundled, but no learner has actually
+  signed in, written a session and had it scored; the scoring trigger also needs
+  a vendor key configured before it does anything but log a skip.
 - VAD thresholds and the barge-in guard window are reasoned starting points that
   want tuning against recorded learner audio.
 

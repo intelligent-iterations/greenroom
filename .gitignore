@@ -23,3 +23,14 @@ evals/reports/*
 .DS_Store
 .vscode/
 .idea/
+
+# terraform / opentofu
+infra/.terraform/
+infra/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+.terraform.tfstate.lock.info
+
+# generated functions deploy directory
+packages/functions/dist/

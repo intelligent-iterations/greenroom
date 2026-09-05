@@ -5,40 +5,79 @@
   },
   "functions": [
     {
-      "source": "packages/functions",
+      "//": "The generated deploy directory, not packages/functions itself: the workspace package.json contains a pnpm workspace: dependency that Cloud Build's npm install cannot resolve. See packages/functions/build.mjs.",
+      "source": "packages/functions/dist",
       "codebase": "default",
       "runtime": "nodejs22",
-      "ignore": ["node_modules", ".git", "*.log"]
+      "predeploy": [
+        "pnpm --filter @greenroom/functions build"
+      ],
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.log"
+      ]
     }
   ],
   "hosting": {
     "public": "packages/web/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
     "rewrites": [
-      { "source": "/api/generate", "function": "generate" },
-      { "source": "**", "destination": "/index.html" }
+      {
+        "source": "/api/generate",
+        "function": "generate"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
     ],
     "headers": [
       {
         "//": "Cross-origin isolation, required for SharedArrayBuffer and therefore for multi-threaded WASM inference on machines without WebGPU. Must match vite.config.ts or the CPU fallback path silently runs ~3x slower in production than in dev.",
         "source": "**",
         "headers": [
-          { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
-          { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" }
+          {
+            "key": "Cross-Origin-Opener-Policy",
+            "value": "same-origin"
+          },
+          {
+            "key": "Cross-Origin-Embedder-Policy",
+            "value": "credentialless"
+          }
         ]
       },
       {
         "//": "Model weights are large and immutable, and re-downloading 1.2GB on every visit would defeat the on-device design.",
         "source": "**/*.@(wasm|onnx|bin)",
-        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
       }
     ]
   },
   "emulators": {
-    "auth": { "port": 9099 },
-    "functions": { "port": 5001 },
-    "firestore": { "port": 8080 },
-    "hosting": { "port": 5000 },
-    "ui": { "enabled": true }
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true
+    }
   }
 }
