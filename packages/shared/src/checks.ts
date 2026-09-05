@@ -81,6 +81,22 @@ const MID_SESSION_FEEDBACK = [
  * check missed: the turns were clean, short, well-formed prose that simply were
  * not an interview.
  */
+/**
+ * Imperative question forms.
+ *
+ * Real interviewers ask plenty of things that never contain a question mark —
+ * "Walk me through the migration", "Tell me about a time you were wrong",
+ * "Describe the failure". Requiring '?' would fail those, and a check that
+ * fails good output is worse than no check: it trains people to ignore it.
+ */
+const IMPERATIVE_ASK = [
+  /\b(?:tell|talk|walk) me (?:about|through)\b/i,
+  /\bdescribe\b/i,
+  /\bexplain\b/i,
+  /\bgive me an example\b/i,
+  /\bstep me through\b/i,
+];
+
 const ASSISTANT_VOICE = [
   /\bhow can I (?:help|assist)\b/i,
   /\bI(?:'m| am) here to (?:help|assist)\b/i,
@@ -173,9 +189,10 @@ export function runChecks(
   // The check that was missing. An interviewer interviews; a turn that asks
   // nothing has stopped doing the job, however well-formed it is. Critical,
   // because a session of statements is not an interview at all.
-  results.push(
-    check('asks_a_question', questions >= 1, 'the turn asks nothing', true),
-  );
+  //
+  // Counts imperative asks as well as question marks — see IMPERATIVE_ASK.
+  const asks = questions >= 1 || IMPERATIVE_ASK.some((p) => p.test(text));
+  results.push(check('asks_a_question', asks, 'the turn asks nothing', true));
 
   const assistant = ASSISTANT_VOICE.filter((p) => p.test(text));
   results.push(

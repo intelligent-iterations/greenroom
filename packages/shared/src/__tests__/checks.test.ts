@@ -26,6 +26,17 @@ describe('asks_a_question', () => {
   it('passes a turn that asks something', () => {
     expect(result('What did the latency settle at?', 'asks_a_question')?.passed).toBe(true);
   });
+
+  it.each([
+    'Walk me through a system you owned from design into production.',
+    'Tell me about a decision that turned out to be wrong.',
+    'Describe the failure mode in as much detail as you can.',
+    'Give me an example of that from your last team.',
+  ])('accepts an imperative ask with no question mark: %s', (turn) => {
+    // Requiring '?' would fail real interviewer phrasing, and a check that
+    // fails good output is worse than none.
+    expect(result(turn, 'asks_a_question')?.passed).toBe(true);
+  });
 });
 
 describe('interviewer_register', () => {
