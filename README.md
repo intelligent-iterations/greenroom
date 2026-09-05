@@ -2,6 +2,8 @@
 
 **Voice-first interview rehearsal that runs on your device.**
 
+Live: **https://greenroom-ii.web.app**
+
 You talk. It listens, asks a real follow-up, and talks back — and on a machine
 with WebGPU, none of your audio, your transcript or your answers leave the
 browser. Speech recognition, the language model and the voice are all running
@@ -344,10 +346,20 @@ have you find them.
   from 9.5 MB to 819 KB; Whisper, WebLLM and Kokoro load only when a session
   actually starts.
 - The eval harness runs end to end and produces a gated report.
-- The infrastructure is real and applied: `tofu apply` created the project,
+- **The backend is deployed and responding.** `tofu apply` created the project,
   Firestore in Montreal with delete protection and point-in-time recovery,
-  anonymous auth, and the web app registration. `firebase deploy --only firestore`
-  compiled and released the security rules against it.
+  anonymous auth, the web app registration, and the Eventarc/Pub/Sub service
+  agents and IAM. `tofu plan` is clean afterwards, so the configuration is
+  genuinely idempotent rather than apply-once. The security rules compiled and
+  released. Both Cloud Functions are `ACTIVE`, and the live `generate` endpoint
+  returns `401 Sign in required` without a Firebase ID token and `405` on GET —
+  which is the deployed code's own auth path answering, not platform IAM.
+- **Hosting is live** at https://greenroom-ii.web.app, serving the app shell,
+  with the SPA rewrite working, `/api/generate` correctly routed to the
+  function, and — the one that silently breaks the CPU fallback path if it is
+  wrong — `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: credentialless` present in production, matching
+  the dev server.
 
 **Not verified — be appropriately sceptical:**
 
@@ -366,10 +378,17 @@ have you find them.
   can be run and reviewed offline with no vendor account. `--record` against a
   live backend replaces them, and only then does the suite catch model
   regressions rather than just prompt and check regressions.
-- **End-to-end behaviour against the live backend is untested.** The rules are
-  deployed and the functions are built and bundled, but no learner has actually
-  signed in, written a session and had it scored; the scoring trigger also needs
-  a vendor key configured before it does anything but log a skip.
+- **No full session has been run against the live backend.** The endpoints
+  answer correctly, but nobody has signed in anonymously, completed an
+  interview, written a session document and watched `onSessionCreated` fold the
+  scores into their mastery estimates. The scoring trigger also needs
+  `AZURE_OPENAI_*` or `GOOGLE_API_KEY` configured before it does anything but
+  log that it skipped.
+- **No live evaluation run.** The gate has only ever run offline against
+  hand-authored reference turns. No baseline exists, and the judge has not been
+  calibrated against human raters — the procedure for that is written up in
+  docs/EVALUATION.md precisely because it is the step that decides whether any
+  of these numbers mean anything.
 - VAD thresholds and the barge-in guard window are reasoned starting points that
   want tuning against recorded learner audio.
 

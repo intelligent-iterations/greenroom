@@ -20,8 +20,20 @@ initializeApp();
  */
 setGlobalOptions({ region: 'northamerica-northeast1', maxInstances: 20 });
 
-/** Streaming cloud inference. Only reached when a learner opts in. */
-export const generate = onRequest({ cors: true, timeoutSeconds: 120 }, handleGenerate);
+/**
+ * Streaming cloud inference. Only reached when a learner opts in.
+ *
+ * `invoker: "public"` opens the Cloud Run service to unauthenticated
+ * *invocation*; it does not make the endpoint unauthenticated. The browser has
+ * no Google credentials to present, so platform-level IAM cannot be the gate —
+ * `handleGenerate` verifies a Firebase ID token and returns 401 without one.
+ * Declaring it here rather than granting run.invoker by hand keeps a clean
+ * redeploy from silently landing a function no browser can reach.
+ */
+export const generate = onRequest(
+  { cors: true, timeoutSeconds: 120, invoker: 'public' },
+  handleGenerate,
+);
 
 /**
  * Scores a session and updates the learner's mastery estimates.
