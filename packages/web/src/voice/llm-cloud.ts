@@ -9,7 +9,11 @@ import type { ChatMessage, GenerateOptions, LanguageModel } from '@greenroom/sha
  * deploy rather than an app release; and the audit log of what left the device
  * lives in one place, which is what a residency review actually asks for.
  *
- * This path is off by default and requires explicit opt-in per session.
+ * This path is off by default and requires explicit opt-in per session. Note
+ * what it does and does not send: recognition and synthesis stay on the device
+ * even here, so only the transcript crosses the network, never the audio. A
+ * recording of someone's voice is biometric data; a transcript is text, and the
+ * two do not carry the same obligations.
  */
 export interface CloudModelOptions {
   /** Vendor-neutral id resolved server-side, e.g. 'azure-gpt-4o-mini'. */

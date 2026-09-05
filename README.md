@@ -515,4 +515,11 @@ evals
 
 ## Licence
 
-MIT.
+MIT, and the stack is permissively licensed throughout — Apache-2.0, MIT or ISC
+for every dependency and every model, with one exception: **Llama 3.2 is
+source-available under Meta's community licence, not OSI open source.** It is
+offered as one model tier among four; every other tier is Apache-2.0, so
+removing it makes the stack cleanly open source at the cost of one option.
+
+Full audit, and what the Meta licence actually obliges, in
+[docs/LICENSES.md](docs/LICENSES.md).

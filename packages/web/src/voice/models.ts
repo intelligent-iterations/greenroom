@@ -44,7 +44,8 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     id: 'onnx-community/Llama-3.2-3B-Instruct-ONNX',
     vendor: 'on-device',
     label: 'Stronger — Llama 3.2 3B',
-    suitedTo: 'Better at staying in role. Needs a machine with memory to spare.',
+    suitedTo:
+      'Better at staying in role. Needs memory to spare. Meta licence, not open source — see docs/LICENSES.md.',
     residency: 'device',
     firstTokenMsP50: 1500,
     qualityScore: 0.72,

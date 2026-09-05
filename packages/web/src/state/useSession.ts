@@ -1,3 +1,4 @@
+import { ensureUser } from '../data/firebase.js';
 import {
   DEFAULT_POLICY,
   NON_LLM_STAGE_VRAM_MB,
@@ -88,10 +89,26 @@ export function useSession() {
       // blocked the VAD cannot deliver a speech event, so the learner cannot
       // interrupt. Imported lazily so the setup screen does not pay for it.
       const { InferencePipeline } = await import('../voice/pipeline-worker.js');
+      const onDevice = selected.vendor === 'on-device';
       const pipeline = new InferencePipeline(
         scenario.language,
-        selected.vendor === 'on-device' ? selected.id : undefined,
+        onDevice ? selected.id : undefined,
       );
+
+      // Even on the cloud route, recognition and the voice stay on this device.
+      // Only the transcript leaves — never the audio. That is a meaningful
+      // difference: a recording of someone's voice is biometric data, a
+      // transcript is text, and they do not carry the same obligations.
+      const languageModel = onDevice
+        ? pipeline.model
+        : await import('../voice/llm-cloud.js').then(
+            (m) =>
+              new m.CloudLanguageModel({
+                model: selected.id,
+                endpoint: '/api/generate',
+                getAuthToken: async () => (await ensureUser())?.getIdToken(),
+              }),
+          );
 
       // Called synchronously enough after the button click to still count as a
       // user gesture. Without this the AudioContext stays suspended and the
@@ -105,7 +122,7 @@ export function useSession() {
         promptStyle: selected.vendor === 'on-device' ? 'compact' : 'full',
         stages: {
           recognizer: pipeline.recognizer,
-          model: pipeline.model,
+          model: languageModel,
           synthesizer: pipeline.synthesizer,
         },
       });

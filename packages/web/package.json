@@ -11,7 +11,8 @@
     "test": "vitest run",
     "preflight": "node --experimental-strip-types scripts/preflight.mjs",
     "assets": "node scripts/copy-vad-assets.mjs",
-    "verify:assets": "node scripts/verify-assets.mjs"
+    "verify:assets": "node scripts/verify-assets.mjs",
+    "build:dev": "pnpm assets && tsc -b && INCLUDE_DEV_PAGES=1 vite build"
   },
   "dependencies": {
     "@greenroom/shared": "workspace:*",

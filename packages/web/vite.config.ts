@@ -31,17 +31,23 @@ export default defineConfig({
   build: {
     target: 'es2022',
     rollupOptions: {
-      // bench.html is a second entry, not part of the app bundle. It drives the
-      // production adapters on real hardware to replace seed latency figures
-      // with measurements; see docs/BENCHMARKS.md.
-      input: {
-        main: 'index.html',
-        bench: 'bench.html',
-        diag: 'diag.html',
-        vadcheck: 'vadcheck.html',
-        probe: 'probe.html',
-        evals: 'evals.html',
-      },
+      // The app is the only entry that ships. The rest are instruments —
+      // benchmarks, the eval runner, hardware probes — that drive the
+      // production adapters on real hardware. They are useful, they are not
+      // product, and publishing them would put an unauthenticated page that
+      // downloads gigabytes of models on a public origin.
+      //
+      // Build them for local work with `pnpm build:dev`.
+      input: process.env.INCLUDE_DEV_PAGES
+        ? {
+            main: 'index.html',
+            bench: 'bench.html',
+            diag: 'diag.html',
+            vadcheck: 'vadcheck.html',
+            probe: 'probe.html',
+            evals: 'evals.html',
+          }
+        : { main: 'index.html' },
     },
   },
 });
