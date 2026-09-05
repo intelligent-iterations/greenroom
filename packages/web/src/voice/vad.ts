@@ -24,6 +24,9 @@ export type { VadController, VadHandlers, VadOptions } from './vad.types.js';
  *     and exposed as an option. It wants tuning against recorded learner audio
  *     per CEFR band rather than left at one value forever.
  */
+/** Must match the output directory of scripts/copy-vad-assets.mjs. */
+export const VAD_ASSET_PATH = '/vad/';
+
 export class VoiceActivityDetector implements VadController {
   #vad?: MicVAD;
   #stream?: MediaStream;
@@ -50,6 +53,14 @@ export class VoiceActivityDetector implements VadController {
       // the already-open echo-cancelled stream so the library never opens a
       // raw one of its own.
       getStream: async () => stream,
+      // These assets are fetched over HTTP at runtime, not bundled, and they
+      // are copied into public/vad/ by scripts/copy-vad-assets.mjs. Pointing at
+      // a subdirectory rather than the origin root matters: with the default
+      // './' the SPA rewrite answers a missing file with index.html and a 200,
+      // so the library parses HTML as an ONNX model and the microphone dies
+      // silently — the app talks and never hears you.
+      baseAssetPath: VAD_ASSET_PATH,
+      onnxWASMBasePath: VAD_ASSET_PATH,
       // We own the stream's lifetime: pausing must not stop the tracks, or
       // resuming mid-session would re-prompt for microphone permission.
       pauseStream: async () => {},

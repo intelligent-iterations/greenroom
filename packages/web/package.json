@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "pnpm assets && vite",
+    "build": "pnpm assets && tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "preflight": "node --experimental-strip-types scripts/preflight.mjs"
+    "preflight": "node --experimental-strip-types scripts/preflight.mjs",
+    "assets": "node scripts/copy-vad-assets.mjs",
+    "verify:assets": "node scripts/verify-assets.mjs"
   },
   "dependencies": {
     "@greenroom/shared": "workspace:*",
