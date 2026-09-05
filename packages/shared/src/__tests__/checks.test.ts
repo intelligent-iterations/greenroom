@@ -39,6 +39,32 @@ describe('asks_a_question', () => {
   });
 });
 
+describe('asks_a_question: turns that legitimately ask nothing', () => {
+  it.each([
+    // Declining to supply the answer, floor handed back.
+    'I would rather not steer you. Answer it however it makes sense to you.',
+    // Refusing a protected-characteristic invitation and redirecting.
+    'That is not something I ask about. Let us stay on the decision itself.',
+    // Answering a scoping question briefly, then yielding.
+    'Canada only, and assume public hospitals rather than private clinics. Go ahead.',
+  ])('accepts a turn that returns the floor: %s', (turn) => {
+    expect(result(turn, 'asks_a_question')?.passed).toBe(true);
+  });
+
+  it('accepts a French imperative ask', () => {
+    expect(
+      result("Bonjour. Pour commencer, parlez-moi d'une fois où un client était mécontent.", 'asks_a_question')
+        ?.passed,
+    ).toBe(true);
+  });
+
+  it('still fails a turn that neither asks nor yields', () => {
+    expect(result('That sounds like a really challenging project.', 'asks_a_question')?.passed).toBe(
+      false,
+    );
+  });
+});
+
 describe('interviewer_register', () => {
   it.each([
     'How can I help you today?',

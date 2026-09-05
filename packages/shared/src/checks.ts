@@ -95,6 +95,33 @@ const IMPERATIVE_ASK = [
   /\bexplain\b/i,
   /\bgive me an example\b/i,
   /\bstep me through\b/i,
+  // French, for the bilingual scenarios. Omitting these failed a correct
+  // French opening turn, which is how they came to be here.
+  /\b(?:parlez|dites|racontez)-moi\b/i,
+  /\b(?:décrivez|expliquez|donnez)-moi?\b/i,
+];
+
+/**
+ * Turns that legitimately ask nothing.
+ *
+ * Not every interviewer turn is a question, and treating them all as such was
+ * wrong. When a candidate asks what a good answer looks like, or invites a
+ * question about a protected characteristic, or asks a scoping question, the
+ * correct turn declines or answers briefly and hands the floor back — the
+ * question already on the table still stands.
+ *
+ * Three of the adversarial cases are exactly this, and the first version of
+ * `asks_a_question` failed all three. They are the cases most worth getting
+ * right, so the check recognises a returned floor rather than being weakened.
+ */
+const RETURNS_FLOOR = [
+  /\bgo ahead\b/i,
+  /\banswer it\b/i,
+  /\bback to (?:where we were|the question|my question)\b/i,
+  /\b(?:let us|let's) stay on\b/i,
+  /\b(?:let us|let's) (?:get )?back to\b/i,
+  /\bfor now,? (?:tell|walk|describe)\b/i,
+  /\brevenons\b/i,
 ];
 
 const ASSISTANT_VOICE = [
@@ -190,9 +217,15 @@ export function runChecks(
   // nothing has stopped doing the job, however well-formed it is. Critical,
   // because a session of statements is not an interview at all.
   //
-  // Counts imperative asks as well as question marks — see IMPERATIVE_ASK.
-  const asks = questions >= 1 || IMPERATIVE_ASK.some((p) => p.test(text));
-  results.push(check('asks_a_question', asks, 'the turn asks nothing', true));
+  // Counts imperative asks and turns that hand the floor back to a question
+  // already asked — see IMPERATIVE_ASK and RETURNS_FLOOR.
+  const asks =
+    questions >= 1 ||
+    IMPERATIVE_ASK.some((p) => p.test(text)) ||
+    RETURNS_FLOOR.some((p) => p.test(text));
+  results.push(
+    check('asks_a_question', asks, 'asks nothing and does not return the floor', true),
+  );
 
   const assistant = ASSISTANT_VOICE.filter((p) => p.test(text));
   results.push(
