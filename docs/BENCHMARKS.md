@@ -1,8 +1,50 @@
 # Benchmarks
 
+## How to run it
+
+```bash
+pnpm --filter @greenroom/web build
+pnpm --filter @greenroom/web exec vite preview --port 5179
+# then open http://localhost:5179/bench.html?model=<mlc-model-id>
+```
+
+`bench.html` drives the **production adapters** — the same recogniser, model and
+synthesiser the app uses, and the same prompt compiler. Only the microphone is
+replaced, by pre-recorded 16kHz utterances in `packages/web/public/bench/`, so a
+run is reproducible and can be driven headlessly. Results land on the page and
+on `window.__BENCH__` for an automation driver to read.
+
+Two things to know before trusting a number from it:
+
+- **Use the preview build, not the dev server.** Vite's HMR and dep optimiser
+  reload the page mid-download, which restarts the run.
+- **Changing port invalidates everything.** The Cache API is keyed by origin, so
+  moving from :5178 to :5179 re-downloads every model.
+
+## Verify models load before benchmarking them
+
+```bash
+pnpm --filter @greenroom/web verify:models
+```
+
+Presence in WebLLM's `prebuiltAppConfig` does **not** mean a model can be
+downloaded. MLC publishes the compiled WASM library and the weights as separate
+artifacts, and at the current pin Qwen3.5 (0.8B/2B/4B) and Ministral 3 have
+libraries published while their weight repositories return 404 for
+`ndarray-cache.json`. WebLLM reports this as `Cache.add() encountered a network
+error`, tens of seconds into a session.
+
+We shipped a unit test asserting the model id existed in `prebuiltAppConfig`. It
+passed, and the model still could not load. Verifying the wrong thing is worse
+than not verifying, because it buys confidence.
+
 ## Status
 
-**No measured benchmark run is committed to this repository.**
+**Latency figures in the model catalogue are measured on a single machine**
+(Apple M-series, Metal-3, Chrome, 10 threads, `maxBufferSize` 4095MB). One
+machine is not a distribution: treat them as a point sample that establishes
+ordering and rough magnitude, not as a p50 across the install base. The hardware
+profiles below are still worth covering.
 
 The latency and quality figures in `packages/web/src/voice/models.ts` are seed
 values. They encode the ordering the design assumes — on-device is fastest to

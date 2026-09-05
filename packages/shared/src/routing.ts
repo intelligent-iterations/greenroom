@@ -77,14 +77,15 @@ export interface RuntimeEnvironment {
 }
 
 /**
- * Rough GPU memory the non-LLM on-device stages occupy.
+ * GPU memory the non-LLM on-device stages occupy.
  *
- * Used to turn a device's total budget into what is actually left for the
- * interviewer model. Approximate on purpose — the point is to stop the router
- * selecting a model that cannot co-exist with the rest of the pipeline, not to
- * predict allocation precisely.
+ * Measured from the published weight sizes of the exact artifacts the manifest
+ * pins: Whisper encoder 78MB + merged decoder 198MB + Kokoro 310MB = 586MB,
+ * rounded up for runtime overhead. Used to turn a device's total budget into
+ * what is left for the interviewer model, so the router cannot select something
+ * that fits alone but not alongside the rest of the pipeline.
  */
-export const NON_LLM_STAGE_VRAM_MB = 700;
+export const NON_LLM_STAGE_VRAM_MB = 650;
 
 export interface RoutingDecision {
   selected?: ModelDescriptor;

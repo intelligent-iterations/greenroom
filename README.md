@@ -68,9 +68,16 @@ pnpm dev
 Open the printed URL in a Chromium-based browser or Safari 18+, allow
 microphone access, and start talking.
 
-The first run downloads roughly 1.2 GB of model weights (Whisper for speech
-recognition, Qwen3.5 2B for the interviewer, Kokoro for the voice) and caches
-them in the browser. After that it works with the network off.
+The first run downloads about 1.6 GB of model weights and caches them in the
+browser — Whisper base for recognition (276 MB), SmolLM2 1.7B at q4f16 for the
+interviewer (1057 MB), and Kokoro for the voice (310 MB). After that it works
+with the network off.
+
+Before downloading anything, you can check the whole model set resolves:
+
+```bash
+pnpm --filter @greenroom/web preflight
+```
 
 **Headphones are strongly recommended.** The microphone stays open while the
 interviewer speaks so you can interrupt it; on laptop speakers this leans hard
@@ -149,6 +156,42 @@ decimals, abbreviations, short fragments — under test).
 audio in the same tick. Being interruptible is most of what makes a voice agent
 feel like a conversation rather than a phone tree.
 
+### Verifying the pipeline before running it
+
+Every on-device stage is declared once, as data, in
+[`model-manifest.ts`](packages/web/src/voice/model-manifest.ts): the repository,
+the ONNX modules it loads, and the quantisation per device. The adapters read
+that manifest and so does `pnpm preflight`, so the configuration that gets
+verified is the configuration that gets fetched.
+
+This exists because of a bug that cost a rewrite. The interviewer was
+originally Qwen3.5 2B on WebLLM/MLC, guarded by a unit test asserting the model
+id existed in MLC's registry. The test passed. The model could not load — MLC
+publishes compiled shader libraries and weights as separate artifacts, and for
+Qwen3.5 and Ministral 3 the weights are simply missing (`ndarray-cache.json`
+returns 404). It surfaced as an opaque `Cache.add()` error, tens of seconds into
+a session. **Verifying the wrong thing was worse than not verifying, because it
+bought confidence.**
+
+There are now two layers, both deterministic and neither needing a GPU:
+
+- **Offline unit tests.** `onnxFileName(module, dtype)` is pure and total, so a
+  URL is fully determined by the manifest. The tests pin the mapping, including
+  that `q8` becomes `_quantized` rather than `_q8`.
+- **`pnpm preflight`.** Resolves the manifest to concrete URLs and HEAD-checks
+  all fifteen in a few seconds.
+
+Preflight has already earned it: it found that `onnx-community/silero-vad` ships
+no `config.json`, which is why the loader is handed one inline.
+
+The stage configuration — models, dtypes, devices — matches Hugging Face's
+[`conversational-webgpu`](https://github.com/huggingface/transformers.js-examples/tree/main/conversational-webgpu)
+example, a published working in-browser voice chat on this stack. Two places
+where we had diverged were both wrong: the LLM (unloadable, as above) and the
+Whisper dtype, where a single `fp16` was quantising the *encoder* — the
+component whose precision governs accuracy on accented speech, which is the
+entire population this product serves.
+
 ### Making it feel realtime
 
 Three things beyond the cascade itself, all aimed at the gap between the learner
@@ -161,14 +204,13 @@ available and always better; the reason not to use it is that a reply which
 arrives late stops being a conversation. When the 4B is rejected for being
 620ms to first token, the UI says so.
 
-**The interviewer is a reasoning model, told firmly not to reason.** Every
-Qwen3.5 variant thinks before answering by default. For a spoken interviewer
-that is strictly bad — it adds seconds of silence, and if any of it escapes, the
-synthesiser reads the model's private deliberation aloud in the interviewer's
-voice. The adapter disables thinking *and* filters `<think>` blocks out of the
-token stream, because the flag is per-vendor and silently ignored by models that
-do not implement it. The filter is stateful, because tags arrive split across
-deltas.
+**Reasoning output never reaches the speaker.** The default interviewer is
+non-reasoning, which is part of why it was chosen. But the router can select
+reasoning-capable models, and a leaked `<think>` block is not degraded output —
+it is the synthesiser reading the model's private deliberation to the learner in
+the interviewer's voice. So the stream is filtered regardless, by a stateful
+stripper, because tags arrive split across deltas (`<thi` in one, `nk>` in the
+next) and a stateless regex emits the halves.
 
 **The first chunk of a turn may break at a clause.** Normally audio waits for a
 complete sentence, which sounds better. Until a turn has made any sound, a comma
@@ -242,7 +284,7 @@ axis that actually decides deployments in this sector:
 
 | Model | Residency | Offline |
 |---|---|---|
-| Qwen3.5 2B / 0.8B / 4B, Llama 3.2 1B (WebLLM) | on device | yes |
+| SmolLM2 1.7B (transformers.js / ONNX) | on device | yes |
 | Azure OpenAI (Canada Central) | Canadian region | no |
 | Google Gemini Flash | US region | no |
 

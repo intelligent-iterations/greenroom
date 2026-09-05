@@ -79,8 +79,8 @@ export function useSession() {
       // starts keeps first paint to the shell, and the cloud path never pays
       // for the on-device runtimes it does not use.
       const model = selected.vendor === 'on-device'
-        ? await import('../voice/llm-webllm.js').then(
-            (m) => new m.WebLlmModel({ model: selected.id }),
+        ? await import('../voice/llm-transformers.js').then(
+            (m) => new m.TransformersLanguageModel({ model: selected.id }),
           )
         : await import('../voice/llm-cloud.js').then(
             (m) =>

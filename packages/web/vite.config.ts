@@ -28,5 +28,13 @@ export default defineConfig({
   // These ship prebuilt WASM/worker assets that Vite's dep optimiser mangles.
   optimizeDeps: { exclude: ['onnxruntime-web', '@huggingface/transformers', 'kokoro-js'] },
   worker: { format: 'es' },
-  build: { target: 'es2022' },
+  build: {
+    target: 'es2022',
+    rollupOptions: {
+      // bench.html is a second entry, not part of the app bundle. It drives the
+      // production adapters on real hardware to replace seed latency figures
+      // with measurements; see docs/BENCHMARKS.md.
+      input: { main: 'index.html', bench: 'bench.html' },
+    },
+  },
 });

@@ -1,78 +1,84 @@
-# ADR 0005: Qwen3.5 2B as the realtime interviewer, chosen under a latency ceiling
+# ADR 0005: transformers.js for on-device generation, and verifying artifacts before running
 
 **Status:** accepted
 **Date:** 2026-09-05
-**Supersedes:** the model choice in ADR 0001, not its reasoning
+**Refines:** ADR 0001 (on-device first)
 
 ## Context
 
-The on-device interviewer has to hold a spoken conversation. That makes model
-selection a latency problem before it is a quality problem, which inverts how
-these decisions are usually made.
+The on-device interviewer has to hold a spoken conversation, which makes model
+selection a latency problem before it is a quality problem. Two runtimes can run
+an LLM in a browser: **WebLLM/MLC** (models compiled to WebGPU shader libraries)
+and **transformers.js** (ONNX Runtime Web, weights loaded from Hugging Face).
 
-Two constraints are not negotiable:
+We started on WebLLM with Qwen3.5 2B, the newest small model in MLC's registry.
 
-1. **It has to be compiled for the browser.** A model can only run here if MLC
-   has compiled it to WebGPU shader libraries and published it in WebLLM's
-   `prebuiltAppConfig`. At the pinned version that includes Qwen3.5
-   (0.8B/2B/4B/9B), Ministral 3 3B, Phi-4-mini, Llama 3.2, SmolLM2 and Gemma up
-   to 3. It does **not** include Gemma 4, which is otherwise a serious
-   contender in this class. "Best small model" is always "best small model
-   somebody compiled".
-2. **Three models share one tab.** Whisper and Kokoro take GPU memory before the
-   interviewer gets any, so a model that fits alone can still fail in situ.
+## What went wrong
+
+The catalogue entry was guarded by a unit test asserting the model id existed in
+MLC's `prebuiltAppConfig`. The test passed. **The model could not load.**
+
+MLC publishes the compiled shader library and the weights as *separate*
+artifacts. For Qwen3.5 (0.8B, 2B, 4B) and Ministral 3 the libraries are
+published and the weight repositories return **404 for `ndarray-cache.json`**,
+the shard manifest. WebLLM reports this as `Cache.add() encountered a network
+error` — opaque, tens of seconds into a session, on the learner's machine.
+
+Only running the pipeline end to end on real hardware found it. The unit test
+verified the wrong thing, which was worse than verifying nothing, because it
+bought confidence.
 
 ## Decision
 
-**Qwen3.5 2B** (`Qwen3.5-2B-q4f16_1-MLC`, ~2.2GB) is the default on-device
-interviewer, selected by policy rather than hardcoded:
+**Move on-device generation to transformers.js**, using
+`HuggingFaceTB/SmolLM2-1.7B-Instruct` at `q4f16` on WebGPU, and **declare every
+on-device artifact in one manifest that both the adapters and a preflight
+checker read.**
 
-- First-token latency is a **hard filter** at 400ms, derived from the pipeline's
-  ~800ms first-audio budget minus what recognition and synthesis need.
-- Quality is the **tie-break** among models that pass.
-- Available GPU memory filters too, using the adapter's `maxBufferSize` as a
-  proxy minus the other stages' share.
-
-So the router picks the best model that can still answer in time and fit. On a
-constrained device it lands on 0.8B; the 4B is rejected on latency and says so.
-
-Thinking is disabled per request, and `<think>` blocks are stripped from the
-stream regardless.
+The stage configuration — models, dtypes, devices — matches Hugging Face's
+[`conversational-webgpu`](https://github.com/huggingface/transformers.js-examples/tree/main/conversational-webgpu)
+example, a published working in-browser voice chat on precisely this stack.
 
 ## Rationale
 
-**Why 2B and not 0.8B.** The interviewer's job is almost entirely
-instruction-following: stay in role, withhold the answer, pitch difficulty to a
-stated seniority, speak within a CEFR ceiling, ask one question. Those are
-exactly what the rubric scores and exactly what degrades first as models shrink.
-0.8B is faster and materially weaker on that; it is the constrained-device
-fallback, chosen on constraint rather than preference.
+**The artifact verified is the artifact fetched.** transformers.js loads ONNX
+weights straight from a Hugging Face repository, so a HEAD request against the
+URL the adapter will use is a complete proof of availability. MLC's two-artifact
+split makes that impossible to check from the id alone — which is the bug.
 
-**Why not 4B.** It is the better model and it loses on the only axis that
-defines this feature. At ~620ms to first token it blows the budget before
-recognition and synthesis have taken their share, and it needs ~3.9GB.
+**One runtime instead of two.** Recognition, generation and synthesis now share
+one ONNX runtime and one browser cache. It also removed a 6 MB dependency.
 
-**Why the latency ceiling is a filter rather than a weight.** Weighted scoring
-would let a large quality advantage buy a latency regression. In a voice product
-that trade is not available: past roughly a second of silence learners assume it
-failed and start talking over it, and no amount of answer quality recovers a
-conversation that has stopped feeling like one.
+**Matching a proven configuration beat reasoning about it.** Where we had
+diverged from the reference, we were wrong twice: the unloadable LLM, and a
+single `fp16` dtype for Whisper that quantised the *encoder*. Encoder precision
+governs accuracy on accented speech — the entire population this product serves.
+Per-module dtypes now come from the manifest.
 
-**Why thinking suppression is treated as a correctness issue.** A leaked
-reasoning block is not degraded output, it is the synthesiser speaking the
-model's private deliberation to the learner in the interviewer's voice. Belt and
-braces is proportionate.
+**Non-reasoning by default.** SmolLM2 does not deliberate before answering,
+which for a voice interviewer removes both the silence and the risk of
+deliberation reaching the synthesiser. The `<think>` stripper stays regardless,
+because the router can select reasoning-capable models and the failure mode is
+the learner hearing the model's private reasoning in the interviewer's voice.
+
+**Latency stays a hard filter.** `REALTIME_FIRST_TOKEN_BUDGET_MS` is derived
+from the pipeline's first-audio budget. A larger model is always available and
+always better; the reason not to use it is that a late reply stops being a
+conversation. Quality decides only among models fast enough.
 
 ## Consequences
 
-- The catalogue is pinned to a WebLLM version. A version bump can add or remove
-  models, so a test asserts every on-device id exists in `prebuiltAppConfig` and
-  that declared VRAM matches the runtime record. Without it, a stale id fails at
-  session start on someone else's machine.
-- The latency figures driving the filter are seed values. This is the sharpest
-  open risk in the design: the ceiling is principled, the numbers it compares
-  against are not yet measured. `docs/BENCHMARKS.md` describes the run.
-- `maxBufferSize` is a proxy for available memory, not a measurement of it —
-  WebGPU exposes no VRAM figure by design. WebLLM's own load-time check remains
-  the backstop.
-- Gemma 4 is worth revisiting whenever MLC compiles it.
+- `pnpm preflight` resolves the manifest to concrete URLs and checks all fifteen
+  in seconds, with no GPU and no downloads. It immediately found that
+  `onnx-community/silero-vad` ships no `config.json`, which is why the loader is
+  handed one inline.
+- `onnxFileName(module, dtype)` is pure and total, so the mapping is unit-tested
+  offline — including that `q8` becomes `_quantized`, not `_q8`. Static proof
+  and network proof are separate layers.
+- **Qwen3.5 remains the model to adopt when its weights land.** It is newer and
+  better and already compiled; only the upload is missing. MLC could be
+  reintroduced behind the same `LanguageModel` interface, but it would need its
+  own preflight covering both artifacts.
+- The manifest is now a single point of truth that can go stale against
+  upstream. Preflight is the guard, and it belongs in CI on a schedule rather
+  than on every commit, since it depends on the network.

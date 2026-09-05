@@ -8,12 +8,12 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "preflight": "node --experimental-strip-types scripts/preflight.mjs"
   },
   "dependencies": {
     "@greenroom/shared": "workspace:*",
     "@huggingface/transformers": "^4.2.0",
-    "@mlc-ai/web-llm": "^0.2.84",
     "@ricky0123/vad-web": "^0.0.30",
     "firebase": "^12.18.0",
     "kokoro-js": "^1.2.1",

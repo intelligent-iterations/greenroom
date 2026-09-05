@@ -3,86 +3,40 @@ import type { ModelDescriptor } from '@greenroom/shared';
 /**
  * The model catalogue the router chooses from.
  *
- * Every on-device id here is verified against WebLLM's own `prebuiltAppConfig`
- * at the pinned version, and `vramMb` is copied from that record rather than
- * estimated. A model id that is not in the prebuilt list cannot be loaded in a
- * browser at all — MLC has to compile weights to WebGPU shader libraries first —
- * so "best small model" is always constrained to "best small model MLC has
- * compiled". As of this pin that rules out Gemma 4, which is otherwise a strong
- * candidate in this size class.
+ * The on-device entry is served by transformers.js from the Hugging Face
+ * repository named in model-manifest.ts, and `pnpm preflight` verifies every
+ * file it will fetch actually resolves before anything is downloaded.
  *
- * `firstTokenMsP50` and `qualityScore` remain SEED VALUES, not measurements —
- * see docs/BENCHMARKS.md. Their *ordering* is grounded: within the Qwen3.5
- * family it follows the published intelligence ranking (0.8B < 2B < 4B) and the
- * parameter count, so routing degrades sensibly. The absolute numbers are not
- * evidence of anything until the benchmark has been run on target hardware.
+ * We arrived here the hard way. The first choice was Qwen3.5 2B on WebLLM/MLC,
+ * guarded by a unit test asserting its id existed in MLC's registry. The test
+ * passed and the model could not load: MLC publishes compiled shader libraries
+ * and weights as separate artifacts, and for Qwen3.5 and Ministral 3 the
+ * weights are missing. Moving the LLM onto transformers.js means the artifact
+ * that gets verified is the artifact that gets fetched, and collapses the
+ * pipeline onto one runtime and one cache.
  *
- * A note that matters more than model choice: every Qwen3.5 variant is a
- * reasoning model. Left alone it will think before answering, which for a
- * spoken interviewer means seconds of silence and then, if any of it escapes,
- * the learner hearing the model's private deliberation read aloud. The adapter
- * disables thinking and filters the stream; see llm-webllm.ts.
+ * Model, dtype and device match Hugging Face's `conversational-webgpu` example,
+ * a published working in-browser voice chat on this stack.
+ *
+ * `vramMb` is the measured size of the exact quantised weight file. Latency
+ * figures are filled in from `bench.html` on real hardware; see
+ * docs/BENCHMARKS.md. `qualityScore` remains a seed value pending a live eval.
  */
 export const MODEL_CATALOGUE: ModelDescriptor[] = [
   {
-    // The realtime default. Qwen3.5's small series targets edge inference
-    // explicitly, and 2B is the smallest variant we would trust to hold a
-    // detailed system prompt — the interviewer has to stay in role, withhold
-    // answers and pitch difficulty, all of which are instruction-following.
-    id: 'Qwen3.5-2B-q4f16_1-MLC',
+    // Matches the reference implementation exactly. Non-reasoning, which for a
+    // voice interviewer is a feature: no think-block latency to suppress and no
+    // route by which deliberation reaches the synthesiser.
+    id: 'HuggingFaceTB/SmolLM2-1.7B-Instruct',
     vendor: 'on-device',
-    label: 'On-device (Qwen3.5 2B)',
+    label: 'On-device (SmolLM2 1.7B)',
     residency: 'device',
-    firstTokenMsP50: 380,
-    qualityScore: 0.7,
+    firstTokenMsP50: 0,
+    qualityScore: 0.6,
     costPerSessionUsd: 0,
     offlineCapable: true,
     requiresWebGpu: true,
-    vramMb: 2246,
-  },
-  {
-    // Fastest option, and the fallback when memory is tight. Materially weaker
-    // at instruction-following, so it is chosen on constraint rather than
-    // preference: a session on a small machine beats no session.
-    id: 'Qwen3.5-0.8B-q4f16_1-MLC',
-    vendor: 'on-device',
-    label: 'On-device (Qwen3.5 0.8B)',
-    residency: 'device',
-    firstTokenMsP50: 260,
-    qualityScore: 0.52,
-    costPerSessionUsd: 0,
-    offlineCapable: true,
-    requiresWebGpu: true,
-    vramMb: 1630,
-  },
-  {
-    // Best on-device quality available here, at nearly 4GB. Reachable only on a
-    // discrete GPU once the recogniser and voice have taken their share.
-    id: 'Qwen3.5-4B-q4f16_1-MLC',
-    vendor: 'on-device',
-    label: 'On-device (Qwen3.5 4B)',
-    residency: 'device',
-    firstTokenMsP50: 620,
-    qualityScore: 0.79,
-    costPerSessionUsd: 0,
-    offlineCapable: true,
-    requiresWebGpu: true,
-    vramMb: 3868,
-  },
-  {
-    // Non-reasoning, and the smallest thing that still holds a persona. Kept as
-    // the floor for very constrained devices and as a control when diagnosing
-    // whether a problem is Qwen3.5's reasoning behaviour or the prompt.
-    id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
-    vendor: 'on-device',
-    label: 'On-device (Llama 3.2 1B)',
-    residency: 'device',
-    firstTokenMsP50: 240,
-    qualityScore: 0.45,
-    costPerSessionUsd: 0,
-    offlineCapable: true,
-    requiresWebGpu: true,
-    vramMb: 879,
+    vramMb: 1057,
   },
   {
     id: 'azure-gpt-4o-mini',

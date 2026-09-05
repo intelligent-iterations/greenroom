@@ -64,13 +64,13 @@ and the next turn follows a thread that does not exist in the conversation.
 | Stage | WebGPU present | No WebGPU |
 |---|---|---|
 | VAD | Silero v5 (ONNX, small enough either way) | same |
-| STT | Whisper base, fp16, WebGPU | Whisper base, q8, multi-threaded WASM |
-| LLM | WebLLM (Qwen3 1.7B) | **no on-device option** — cloud, with consent |
+| STT | Whisper base, encoder fp32 + decoder fp32 | Whisper base, encoder fp32 + decoder q8, threaded WASM |
+| LLM | transformers.js (SmolLM2 1.7B, q4f16) | **no on-device option** — cloud, with consent |
 | TTS | Kokoro-82M (English only) | platform speech synthesis |
 
 Two of these deserve explanation.
 
-**There is no CPU fallback for the LLM.** A 1-2B model decoding on WASM is far
+**There is no CPU fallback for the LLM.** A 1.7B model decoding on WASM is far
 outside the conversational budget. A voice partner that takes several seconds to
 start replying is not a slower product, it is a worse and different one. Without
 a GPU the app asks for consent to use a cloud model, and if refused it says so
