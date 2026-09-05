@@ -19,6 +19,9 @@ export {
   compositeScore,
   criticalFailures,
   findScenario,
+  runChecks,
+  checkFailures,
+  criticalCheckFailures,
 } from '@greenroom/shared';
 
 export type {

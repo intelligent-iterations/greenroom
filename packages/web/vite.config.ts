@@ -39,6 +39,7 @@ export default defineConfig({
         bench: 'bench.html',
         diag: 'diag.html',
         vadcheck: 'vadcheck.html',
+        probe: 'probe.html',
       },
     },
   },

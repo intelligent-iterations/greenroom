@@ -106,9 +106,12 @@ resource "google_identity_platform_config" "auth" {
     # permanently dirty plan is how real drift gets ignored. And stating that
     # email and phone sign-in are OFF is worth more in a review than their
     # absence, which reads as an oversight.
+    # Email/password sign-in. Enabled so a learner can keep their progress
+    # across devices without a Google account, which matters in an
+    # institutional setting where personal Google accounts are often blocked.
     email {
-      enabled           = false
-      password_required = false
+      enabled           = true
+      password_required = true
     }
 
     phone_number {
@@ -120,6 +123,14 @@ resource "google_identity_platform_config" "auth" {
   multi_tenant {
     allow_tenants = false
   }
+
+  # Anonymous accounts are upgraded in place when a learner signs in, so the
+  # sessions they completed before signing up are not orphaned.
+  authorized_domains = [
+    "localhost",
+    "${var.project_id}.firebaseapp.com",
+    "${var.project_id}.web.app",
+  ]
 
   depends_on = [google_project_service.services]
 }

@@ -85,6 +85,8 @@ export function useSession() {
       const session = new InterviewSession({
         scenario,
         learner,
+        // On-device models cannot follow the full prompt; see PromptStyle.
+        promptStyle: selected.vendor === 'on-device' ? 'compact' : 'full',
         stages: {
           recognizer: pipeline.recognizer,
           model: pipeline.model,

@@ -8,6 +8,7 @@ import {
   type SpeechSynthesizer,
   type TranscriptionResult,
 } from '@greenroom/shared';
+import { logEvent } from './diagnostics.js';
 import type { WorkerRequest, WorkerResponse } from './inference.worker.js';
 
 /**
@@ -100,6 +101,7 @@ export class InferencePipeline {
         break;
 
       case 'ready':
+        logEvent('models.ready');
         this.#pending.get(0)?.resolve(undefined as never);
         this.#pending.delete(0);
         break;
@@ -134,6 +136,7 @@ export class InferencePipeline {
         break;
 
       case 'error': {
+        logEvent('worker.error', { message: message.message, id: message.id });
         const error = new Error(message.message);
         if (message.id !== undefined) {
           this.#pending.get(message.id)?.reject(error);
@@ -315,12 +318,16 @@ export class InferencePipeline {
    */
   async primeAudio(): Promise<void> {
     this.#audio ??= new AudioContext();
+    const before = this.#audio.state;
     if (this.#audio.state === 'suspended') {
       await Promise.race([
         this.#audio.resume(),
         new Promise((r) => setTimeout(r, RESUME_TIMEOUT_MS)),
       ]);
     }
+    // If this still reads "suspended", the interviewer will be inaudible and
+    // the guard timers will be doing all the work.
+    logEvent('audio.primed', { before, after: this.#audio.state });
   }
 
   /** Drops the attention cache. Call when starting a new conversation. */

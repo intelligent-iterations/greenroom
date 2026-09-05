@@ -80,7 +80,29 @@ describe('InterviewSession opening turn', () => {
     const messages = model.receivedMessages[0]!;
     expect(messages[0]?.role).toBe('system');
     expect(messages[0]?.content).toContain('Northwind');
-    expect(messages).toHaveLength(1);
+  });
+
+  it('seeds a user turn on the opening so small models have something to answer', () => {
+    // Measured: given only a system prompt, a 1.7B model replies with a single
+    // word. Given one user message it asks a real question.
+    const { session, model } = build();
+    void session.start();
+    return flush().then(() => {
+      model.script('Walk me through a system you owned.');
+      const messages = model.receivedMessages[0]!;
+      expect(messages).toHaveLength(2);
+      expect(messages[1]?.role).toBe('user');
+    });
+  });
+
+  it('does not show the seeded opening turn to the learner', async () => {
+    const { session, model } = build();
+    const started = session.start();
+    await flush();
+    model.script('Walk me through a system you owned.');
+    await started;
+    // The seed is a prompt-layer device, not something the learner said.
+    expect(session.turns.filter((t) => t.role === 'learner')).toHaveLength(0);
   });
 });
 

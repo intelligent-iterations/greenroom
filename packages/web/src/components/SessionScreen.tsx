@@ -1,6 +1,7 @@
 import { LATENCY_BUDGET } from '@greenroom/shared';
 import { useEffect, useRef } from 'react';
 import { median, useAppStore } from '../state/store.js';
+import { DiagnosticsPanel } from './DiagnosticsPanel.js';
 import type { useSession } from '../state/useSession.js';
 
 const STATE_LABEL: Record<string, string> = {
@@ -33,18 +34,37 @@ export function SessionScreen({ session }: { session: ReturnType<typeof useSessi
       <section className={`status status--${sessionState}`}>
         <span className="status__dot" aria-hidden="true" />
         <strong>{STATE_LABEL[sessionState] ?? sessionState}</strong>
-        {sessionState === 'listening' && <span className="muted"> — just start talking</span>}
-        {sessionState === 'speaking' && <span className="muted"> — interrupt any time</span>}
+        {sessionState === 'listening' && (
+          <span className="muted"> — just start talking, then pause when you are done</span>
+        )}
+        {sessionState === 'speaking' && (
+          <span className="muted"> — talk over it to interrupt</span>
+        )}
+        {sessionState === 'transcribing' && <span className="muted"> — reading that back</span>}
+        {sessionState === 'thinking' && <span className="muted"> — one moment</span>}
       </section>
 
-      {sessionState === 'loading' && progress && (
+      {sessionState === 'loading' && (
         <div className="card">
-          <p>{progress.stage}</p>
-          <progress value={progress.progress} max={1} />
+          <p>
+            Getting the models ready{progress?.stage ? ` — ${progress.stage}` : ''}
+          </p>
+          <progress value={progress?.progress ?? 0} max={1} />
+          <p className="muted small">
+            The first run downloads about 1.6 GB and keeps it. After that this takes a
+            few seconds and works offline.
+          </p>
         </div>
       )}
 
       <div className="transcript" ref={scrollRef}>
+        {turns.filter((t) => t.role !== 'system').length === 0 && !liveText && (
+          <p className="muted">
+            {sessionState === 'loading'
+              ? 'The interviewer will speak first.'
+              : 'Listening. Say something to begin.'}
+          </p>
+        )}
         {turns
           .filter((t) => t.role !== 'system')
           .map((turn) => (
@@ -67,6 +87,8 @@ export function SessionScreen({ session }: { session: ReturnType<typeof useSessi
       </div>
 
       {error && <p className="error">{error}</p>}
+
+      <DiagnosticsPanel />
 
       <div className="row">
         <button type="button" className="primary" onClick={() => void session.stop()}>

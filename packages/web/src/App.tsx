@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AccountBar } from './components/AccountBar.js';
 import { DebriefScreen } from './components/DebriefScreen.js';
 import { SessionScreen } from './components/SessionScreen.js';
 import { SetupScreen } from './components/SetupScreen.js';
@@ -22,6 +23,7 @@ export function App() {
         <span className="app__mark" aria-hidden="true" />
         <h1>Greenroom</h1>
         <p className="app__tagline">Interview practice that never leaves your device</p>
+        {phase === 'setup' && <AccountBar />}
       </header>
 
       <main>

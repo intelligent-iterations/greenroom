@@ -10,9 +10,11 @@ import {
   type LoadProgress,
   type SpeechRecognizer,
   type SpeechSynthesizer,
+  type PromptStyle,
   type Turn,
   type TurnTimings,
 } from '@greenroom/shared';
+import { logEvent } from './diagnostics.js';
 import { Emitter } from './emitter.js';
 import type { VadController } from './vad.types.js';
 
@@ -48,6 +50,11 @@ export interface SessionConfig {
   stages: SessionStages;
   /** Injectable for tests; defaults to the real microphone-backed detector. */
   vad?: VadController;
+  /**
+   * How much prompt the model can follow. On-device models get 'compact';
+   * see the note on PromptStyle for why this is a capability decision.
+   */
+  promptStyle?: PromptStyle;
 }
 
 /**
@@ -84,7 +91,7 @@ const BARGE_IN_GUARD_MS = 400;
  */
 export class InterviewSession extends Emitter<SessionEvents> {
   readonly scenario: InterviewScenario;
-  readonly prompt: CompiledPrompt;
+  prompt: CompiledPrompt;
 
   #stages: SessionStages;
   #learner: LearnerState;
@@ -95,6 +102,9 @@ export class InterviewSession extends Emitter<SessionEvents> {
 
   /** Aborts the in-flight interviewer turn. Replaced each turn. */
   #turnAbort?: AbortController;
+  #promptStyle: PromptStyle;
+  /** Which required question the interviewer is working toward. */
+  #questionIndex = 0;
   /** Serialises TTS so sentences play in order. */
   #speakQueue: Promise<void> = Promise.resolve();
   /** performance.now() when the current playback began. Guards barge-in. */
@@ -107,7 +117,26 @@ export class InterviewSession extends Emitter<SessionEvents> {
     this.#stages = config.stages;
     this.#learner = config.learner;
     if (config.vad) this.#vad = config.vad;
-    this.prompt = compileInterviewerPrompt({ scenario: config.scenario, learner: config.learner });
+    this.#promptStyle = config.promptStyle ?? 'full';
+    this.prompt = this.#compilePrompt();
+  }
+
+  /**
+   * Recompiles the system prompt for the current point in the interview.
+   *
+   * The compact prompt names the single question to work toward rather than
+   * listing them all and asking the model to remember what it has covered.
+   * Coverage is bookkeeping, and software is better at it than a 1.7B model.
+   */
+  #compilePrompt(): CompiledPrompt {
+    const questions = this.scenario.requiredQuestions;
+    const index = Math.min(this.#questionIndex, questions.length - 1);
+    return compileInterviewerPrompt({
+      scenario: this.scenario,
+      learner: this.#learner,
+      style: this.#promptStyle,
+      ...(questions[index] ? { nextQuestion: questions[index] } : {}),
+    });
   }
 
   get state(): SessionState {
@@ -120,6 +149,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
 
   #setState(state: SessionState): void {
     if (this.#state === state) return;
+    logEvent('state', { from: this.#state, to: state });
     this.#state = state;
     this.emit('state', state);
   }
@@ -165,10 +195,22 @@ export class InterviewSession extends Emitter<SessionEvents> {
    * learner has taken the floor, so the current turn is abandoned immediately.
    */
   #handleSpeechStart(): void {
-    if (this.#state !== 'speaking' && this.#state !== 'thinking') return;
+    const sincePlayback = Math.round(performance.now() - this.#playbackStartedAt);
 
-    const sincePlayback = performance.now() - this.#playbackStartedAt;
-    if (this.#state === 'speaking' && sincePlayback < BARGE_IN_GUARD_MS) return;
+    if (this.#state !== 'speaking' && this.#state !== 'thinking') {
+      logEvent('vad.speechStart.ignored', { state: this.#state });
+      return;
+    }
+
+    if (this.#state === 'speaking' && sincePlayback < BARGE_IN_GUARD_MS) {
+      // Most likely the interviewer's own voice leaking into the microphone
+      // before echo cancellation has converged. Recorded because if barge-in
+      // feels unresponsive, this is the first number to question.
+      logEvent('vad.speechStart.withinGuard', { sincePlaybackMs: sincePlayback, guardMs: BARGE_IN_GUARD_MS });
+      return;
+    }
+
+    logEvent('bargeIn', { state: this.#state, sincePlaybackMs: sincePlayback });
 
     if (this.#timings) this.#timings.bargedIn = true;
     this.#stages.synthesizer.stop();
@@ -182,6 +224,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
     // talking — that is the silence they actually experience.
     const speechEndedAt = performance.now();
     this.#timings = { speechEndedAt };
+    logEvent('vad.speechEnd', { samples: audio.length, seconds: +(audio.length / 16000).toFixed(2) });
     this.#setState('transcribing');
 
     try {
@@ -191,7 +234,13 @@ export class InterviewSession extends Emitter<SessionEvents> {
       // Whisper hallucinates stock phrases ("Thank you.", "Bye.") on near-silent
       // input. Dropping short transcripts costs a genuine one-word answer
       // occasionally; not dropping them derails the interview constantly.
+      logEvent('stt.transcript', {
+        ms: Math.round(this.#timings.sttMs ?? 0),
+        text: result.text,
+      });
+
       if (result.text.trim().length < 2) {
+        logEvent('stt.discarded', { reason: 'too short', text: result.text });
         this.#setState('listening');
         return;
       }
@@ -213,6 +262,10 @@ export class InterviewSession extends Emitter<SessionEvents> {
 
   /** Generates and speaks one interviewer turn, streaming sentence by sentence. */
   async #runInterviewerTurn(): Promise<void> {
+    // Recompiled each turn so the prompt names the question currently being
+    // worked toward. Cheap: it is a pure function of scenario and learner.
+    (this as { prompt: CompiledPrompt }).prompt = this.#compilePrompt();
+
     const abort = new AbortController();
     this.#turnAbort = abort;
     const anchor = this.#timings?.speechEndedAt ?? performance.now();
@@ -238,6 +291,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
         if (firstToken) {
           firstToken = false;
           if (this.#timings) this.#timings.firstTokenMs = performance.now() - anchor;
+          logEvent('llm.firstToken', { ms: Math.round(performance.now() - anchor) });
         }
 
         full += delta;
@@ -253,6 +307,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
         buffer = remainder;
         for (const chunk of chunks) {
           spokeThisTurn = true;
+          logEvent('tts.enqueue', { chars: chunk.length, clause: !this.#timings?.firstAudioMs });
           this.#enqueueSpeech(chunk, abort, anchor);
         }
       }
@@ -274,11 +329,17 @@ export class InterviewSession extends Emitter<SessionEvents> {
 
       if (this.#timings) {
         this.#timings.turnaroundMs = performance.now() - anchor;
+        logEvent('turn.complete', {
+          turnaroundMs: Math.round(this.#timings.turnaroundMs),
+          words: full.trim().split(/\s+/).length,
+        });
         this.emit('timings', this.#timings);
       }
 
       this.#recordInterviewerTurn(full, anchor, false);
       this.#interviewerTurnCount += 1;
+      // One required question, then room for a single follow-up, then move on.
+      this.#questionIndex = Math.floor(this.#interviewerTurnCount / 2);
 
       if (this.#interviewerTurnCount >= this.scenario.maxTurns) {
         await this.end();
@@ -319,6 +380,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
 
         if (this.#timings && this.#timings.firstAudioMs === undefined) {
           this.#timings.firstAudioMs = performance.now() - anchor;
+          logEvent('tts.firstAudio', { ms: Math.round(this.#timings.firstAudioMs) });
         }
         this.#playbackStartedAt = performance.now();
         this.#setState('speaking');
@@ -335,15 +397,22 @@ export class InterviewSession extends Emitter<SessionEvents> {
 
   /** Maps the transcript into the model's chat format. */
   #buildMessages(): ChatMessage[] {
-    return [
-      { role: 'system', content: this.prompt.system },
-      ...this.#turns
-        .filter((t) => t.role !== 'system')
-        .map((t): ChatMessage => ({
-          role: t.role === 'interviewer' ? 'assistant' : 'user',
-          content: t.text,
-        })),
-    ];
+    const history = this.#turns
+      .filter((t) => t.role !== 'system')
+      .map((t): ChatMessage => ({
+        role: t.role === 'interviewer' ? 'assistant' : 'user',
+        content: t.text,
+      }));
+
+    // Small models handle a system prompt with no user turn badly — measured,
+    // the same model that asks a competent question with one user message
+    // answers a bare system prompt with a single word. Seeding the opening
+    // gives it something to respond to. It is never shown to the learner.
+    if (history.length === 0) {
+      history.push({ role: 'user', content: "I'm ready to begin." });
+    }
+
+    return [{ role: 'system', content: this.prompt.system }, ...history];
   }
 
   #pushTurn(turn: Turn): void {
@@ -352,6 +421,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
   }
 
   #fail(err: unknown): void {
+    logEvent('error', { message: err instanceof Error ? err.message : String(err) });
     this.#setState('error');
     this.emit('error', toError(err));
   }

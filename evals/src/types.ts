@@ -1,4 +1,5 @@
 import { CefrLevel, SeniorityLevel, z, type Score } from './deps.ts';
+import type { CheckResult } from '@greenroom/shared';
 
 /**
  * A single evaluation case.
@@ -40,15 +41,6 @@ export const EvalCase = z.object({
   tags: z.array(z.string()).default([]),
 });
 export type EvalCase = z.infer<typeof EvalCase>;
-
-export interface CheckResult {
-  check: string;
-  passed: boolean;
-  /** Why it failed, for the report. Empty when passed. */
-  detail: string;
-  /** A failed critical check fails the build on its own. */
-  critical: boolean;
-}
 
 export interface CaseResult {
   case: EvalCase;

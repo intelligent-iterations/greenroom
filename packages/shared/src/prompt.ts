@@ -24,7 +24,7 @@ import {
  * version in its report and the CI gate compares against the baseline captured
  * under the previous version.
  */
-export const PROMPT_VERSION = '2026-09-05.3';
+export const PROMPT_VERSION = '2026-09-05.4';
 
 /**
  * CEFR governs *how* the interviewer speaks. It deliberately does not govern
@@ -48,6 +48,25 @@ const CEFR_REGISTER: Record<CefrLevel, string> = {
   C2: 'No constraints. Use the full register of a native professional interviewer.',
 };
 
+/** One-line register guidance, for prompts that cannot afford a paragraph. */
+const CEFR_BRIEF: Record<CefrLevel, string> = {
+  A1: 'Use only very simple words and short sentences.',
+  A2: 'Use simple words and sentences under fifteen words.',
+  B1: 'Use everyday work vocabulary and explain any technical term.',
+  B2: 'Speak naturally; avoid idioms and long clauses.',
+  C1: 'Speak naturally, as to a fluent colleague.',
+  C2: 'No language restrictions.',
+};
+
+/** One-line difficulty guidance, paired with CEFR_BRIEF. */
+const SENIORITY_BRIEF: Record<SeniorityLevel, string> = {
+  intern: 'Ask about fundamentals and how they learn.',
+  junior: 'Ask about code they personally wrote.',
+  mid: 'Ask how they built something and what it cost them.',
+  senior: 'Ask about design tradeoffs and what they gave up.',
+  staff: 'Challenge their approach and make them defend its scope.',
+};
+
 const SENIORITY_BAR: Record<SeniorityLevel, string> = {
   intern: 'Probe fundamentals and learning ability. Accept textbook answers. Do not ask about org-level tradeoffs.',
   junior: 'Probe hands-on experience with one system. Expect specifics about code they wrote, not team decisions.',
@@ -65,9 +84,34 @@ export interface CompiledPrompt {
   reraisedError?: string;
 }
 
+/**
+ * How much prompt the target model can actually follow.
+ *
+ * Not a stylistic preference — a capability constraint discovered by measuring.
+ * The full prompt is ~680 tokens across eight sections, which a frontier model
+ * follows well and a 1.7B on-device model does not follow at all: it collapses
+ * to one-word replies ("Speak"). The same model given a 32-token instruction
+ * asks a competent interview question.
+ *
+ * So prompt complexity is selected from the model, not from taste. `compact`
+ * keeps the constraints that matter pedagogically — one short spoken question,
+ * no answer leakage, no mid-session feedback, language pitched to CEFR,
+ * difficulty pitched to seniority — and drops the structure a small model
+ * cannot parse.
+ */
+export type PromptStyle = 'full' | 'compact';
+
 export interface CompileInput {
   scenario: InterviewScenario;
   learner: LearnerState;
+  style?: PromptStyle;
+  /**
+   * The one question to steer toward this turn. Coverage is tracked by the
+   * orchestrator rather than delegated to the model: asking a small model to
+   * remember which of five questions it has already covered is most of why the
+   * full prompt is long, and it is bookkeeping software does better.
+   */
+  nextQuestion?: string;
 }
 
 /**
@@ -118,12 +162,41 @@ function numbered(items: string[]): string {
 }
 
 /**
+ * Compact interviewer prompt, for small on-device models.
+ *
+ * Roughly a tenth the size of the full prompt. Every line here survived the
+ * question "does removing this change what the model does?" — the ordering is
+ * deliberate, with the behavioural rules last because that is what small models
+ * weight most heavily.
+ */
+function compileCompactPrompt(input: CompileInput): CompiledPrompt {
+  const { scenario, learner } = input;
+  const focus = selectFocusCompetencies(scenario, learner);
+  const question = input.nextQuestion ?? scenario.requiredQuestions[0] ?? '';
+  const lang = scenario.language === 'fr' ? 'Reply in French only.' : '';
+
+  const system = [
+    `You are ${scenario.interviewerPersona} at ${scenario.company}. You are interviewing a candidate for a ${scenario.role} job.`,
+    `Ask exactly ONE short question, then stop. Under 40 words. Plain spoken words only, no lists, no symbols. ${lang}`.trim(),
+    CEFR_BRIEF[learner.cefr],
+    SENIORITY_BRIEF[scenario.seniority],
+    `Never answer your own question. Never say what a good answer contains. Never give feedback or scores.`,
+    `If their last answer was vague, ask for the specific detail instead of moving on.`,
+    `Ask about this next: ${question}`,
+  ].join('\n');
+
+  return { version: PROMPT_VERSION, system, focus };
+}
+
+/**
  * Build the interviewer system prompt.
  *
  * Pure function of (scenario, learner). No clocks, no randomness, no I/O — the
  * harness relies on identical input producing identical output.
  */
 export function compileInterviewerPrompt(input: CompileInput): CompiledPrompt {
+  if (input.style === 'compact') return compileCompactPrompt(input);
+
   const { scenario, learner } = input;
   const focus = selectFocusCompetencies(scenario, learner);
   const reraisedError = selectReraisedError(learner);

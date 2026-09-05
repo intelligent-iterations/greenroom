@@ -1,4 +1,5 @@
 import { MicVAD } from '@ricky0123/vad-web';
+import { logEvent } from './diagnostics.js';
 import type { VadController, VadHandlers, VadOptions } from './vad.types.js';
 
 export type { VadController, VadHandlers, VadOptions } from './vad.types.js';
@@ -47,6 +48,12 @@ export class VoiceActivityDetector implements VadController {
       },
     });
 
+    const track = this.#stream.getAudioTracks()[0];
+    logEvent('mic.opened', {
+      label: track?.label,
+      settings: track?.getSettings() as unknown as Record<string, unknown>,
+    });
+
     const stream = this.#stream;
     this.#vad = await MicVAD.new({
       // 0.0.30 takes a stream *factory* rather than a stream. Ours resolves to
@@ -66,9 +73,20 @@ export class VoiceActivityDetector implements VadController {
       pauseStream: async () => {},
       resumeStream: async () => stream,
       model: 'v5',
-      onSpeechStart: handlers.onSpeechStart,
-      onSpeechEnd: handlers.onSpeechEnd,
-      onVADMisfire: handlers.onMisfire ?? (() => {}),
+      onSpeechStart: () => {
+        logEvent('vad.raw.speechStart');
+        handlers.onSpeechStart();
+      },
+      onSpeechEnd: (audio) => {
+        logEvent('vad.raw.speechEnd', { seconds: +(audio.length / 16000).toFixed(2) });
+        handlers.onSpeechEnd(audio);
+      },
+      onVADMisfire: () => {
+        // Speech too short to count. If the learner says something brief and
+        // nothing happens, this is where it went.
+        logEvent('vad.misfire');
+        handlers.onMisfire?.();
+      },
       // Raised from the 0.5 default: an aggressive threshold is what stops
       // residual echo and background room noise from opening a turn.
       positiveSpeechThreshold: 0.6,
@@ -84,6 +102,7 @@ export class VoiceActivityDetector implements VadController {
 
     await this.#vad.start();
     this.#running = true;
+    logEvent('vad.started');
   }
 
   /** Stops emitting without releasing the mic. Used between sessions. */
