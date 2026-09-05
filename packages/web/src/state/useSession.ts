@@ -48,14 +48,27 @@ export function useSession() {
       ? { ...DEFAULT_POLICY, requireOnDevice: false, allowedResidencies: [], preferQuality: true }
       : { ...DEFAULT_POLICY, preferQuality: true };
 
+    // An explicit choice wins over the policy's preference, but still has to
+    // clear the hard constraints — a learner cannot pick a model that will not
+    // fit in their GPU.
+    const chosen = store.modelId
+      ? MODEL_CATALOGUE.filter((m) => m.id === store.modelId)
+      : MODEL_CATALOGUE;
+
     setRouting(
       selectModel(
-        MODEL_CATALOGUE,
-        { ...base, ...(vramBudgetMb !== undefined ? { vramBudgetMb } : {}) },
+        chosen,
+        {
+          ...base,
+          ...(vramBudgetMb !== undefined ? { vramBudgetMb } : {}),
+          // A deliberately chosen model should not be rejected for being a
+          // little slower than the automatic pick would tolerate.
+          ...(store.modelId ? { maxFirstTokenMs: 4000 } : {}),
+        },
         { hasWebGpu: capabilities.hasWebGpu, online: navigator.onLine },
       ),
     );
-  }, [capabilities, store.allowCloud]);
+  }, [capabilities, store.allowCloud, store.modelId]);
 
   const start = useCallback(
     async (learner: LearnerState) => {
@@ -75,7 +88,10 @@ export function useSession() {
       // blocked the VAD cannot deliver a speech event, so the learner cannot
       // interrupt. Imported lazily so the setup screen does not pay for it.
       const { InferencePipeline } = await import('../voice/pipeline-worker.js');
-      const pipeline = new InferencePipeline(scenario.language);
+      const pipeline = new InferencePipeline(
+        scenario.language,
+        selected.vendor === 'on-device' ? selected.id : undefined,
+      );
 
       // Called synchronously enough after the button click to still count as a
       // user gesture. Without this the AudioContext stays suspended and the

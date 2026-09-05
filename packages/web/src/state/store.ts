@@ -29,11 +29,14 @@ interface AppStore {
   error?: string;
   /** Set when the learner opts into cloud inference for this session. */
   allowCloud: boolean;
+  /** Chosen on-device model id, or undefined to let the router decide. */
+  modelId?: string;
 
   setPhase: (phase: Phase) => void;
   setScenario: (id: string) => void;
   setLearner: (learner: LearnerState) => void;
   setAllowCloud: (allow: boolean) => void;
+  setModelId: (id: string | undefined) => void;
   setSessionState: (state: SessionState) => void;
   setProgress: (progress: LoadProgress) => void;
   addTurn: (turn: Turn) => void;
@@ -56,6 +59,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setScenario: (scenarioId) => set({ scenarioId }),
   setLearner: (learner) => set({ learner }),
   setAllowCloud: (allowCloud) => set({ allowCloud }),
+  setModelId: (modelId) => set({ modelId }),
   setSessionState: (sessionState) => set({ sessionState }),
   setProgress: (progress) => set({ progress }),
   // The live caption is replaced by the committed turn, so it clears here

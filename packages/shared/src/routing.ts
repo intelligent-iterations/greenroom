@@ -45,6 +45,14 @@ export interface ModelDescriptor {
   /** Set when the backend requires hardware the browser may not have. */
   requiresWebGpu?: boolean;
   /**
+   * Bytes the learner downloads, in MB, summed across every weight file
+   * including external `_data` shards. What they wait for on a first run, and
+   * the number that decides whether a model is reasonable on their connection.
+   */
+  downloadMb?: number;
+  /** Short note on when to pick this one, shown in the model picker. */
+  suitedTo?: string;
+  /**
    * GPU memory the weights need, in MB, as published by the runtime.
    *
    * The one number in this descriptor that is measured rather than assumed: it

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findStage } from '../model-manifest.js';
-import { MODEL_CATALOGUE } from '../models.js';
+import { MODEL_CATALOGUE, affordableModels } from '../models.js';
 
 /**
  * Guards the bug class that cost us a rewrite: a catalogue entry naming a model
@@ -36,5 +36,41 @@ describe('on-device catalogue', () => {
     for (const m of MODEL_CATALOGUE.filter((x) => x.vendor !== 'on-device')) {
       expect(m.residency).not.toBe('device');
     }
+  });
+});
+
+describe('model tiers', () => {
+  const onDevice = MODEL_CATALOGUE.filter((m) => m.vendor === 'on-device');
+
+  it('offers a range of sizes so the choice can follow the hardware', () => {
+    const sizes = onDevice.map((m) => m.downloadMb ?? 0).sort((a, b) => a - b);
+    expect(sizes.length).toBeGreaterThanOrEqual(3);
+    // A meaningful spread, not three variants of the same size.
+    expect(sizes[sizes.length - 1]! / sizes[0]!).toBeGreaterThan(4);
+  });
+
+  it('declares a download size and a note for every selectable model', () => {
+    for (const m of onDevice) {
+      expect(m.downloadMb).toBeGreaterThan(0);
+      expect(m.suitedTo).toBeTruthy();
+    }
+  });
+
+  it('ranks quality with size, so "bigger" is never also "worse"', () => {
+    const bySize = [...onDevice].sort((a, b) => (a.vramMb ?? 0) - (b.vramMb ?? 0));
+    const quality = bySize.map((m) => m.qualityScore);
+    expect(quality).toEqual([...quality].sort((a, b) => a - b));
+  });
+
+  it('only offers models that fit the memory budget', () => {
+    // 1500MB leaves room for the small models and not the large ones.
+    const fits = affordableModels(1500);
+    expect(fits.every((m) => (m.vramMb ?? 0) <= 1500)).toBe(true);
+    expect(fits.length).toBeGreaterThan(0);
+    expect(fits.length).toBeLessThan(onDevice.length);
+  });
+
+  it('offers everything when the device reports no budget', () => {
+    expect(affordableModels(undefined)).toHaveLength(onDevice.length);
   });
 });

@@ -31,7 +31,7 @@ import { findStage } from './model-manifest.js';
 import type { ChatMessage } from '@greenroom/shared';
 
 export type WorkerRequest =
-  | { type: 'load'; language: 'en' | 'fr' }
+  | { type: 'load'; language: 'en' | 'fr'; llmRepo?: string }
   | { type: 'warmUp'; systemPrompt: string }
   | { type: 'transcribe'; id: number; audio: Float32Array }
   | { type: 'generate'; id: number; messages: ChatMessage[]; maxTokens: number; temperature: number }
@@ -73,7 +73,7 @@ const progressOf = (info: unknown): number =>
     ? (info as { progress: number }).progress / 100
     : 0;
 
-async function load(): Promise<void> {
+async function load(llmRepo?: string): Promise<void> {
   const stt = findStage('stt');
   const llmSpec = findStage('llm');
   const ttsSpec = findStage('tts');
@@ -89,8 +89,11 @@ async function load(): Promise<void> {
   await recognizer(new Float32Array(16_000), { language });
 
   post({ type: 'progress', stage: 'interviewer', progress: 0 });
-  tokenizer = await AutoTokenizer.from_pretrained(llmSpec.repo);
-  llm = await AutoModelForCausalLM.from_pretrained(llmSpec.repo, {
+  // The learner picks a model from the catalogue; the manifest entry is the
+  // default. Everything else about the stage is identical.
+  const repo = llmRepo ?? llmSpec.repo;
+  tokenizer = await AutoTokenizer.from_pretrained(repo);
+  llm = await AutoModelForCausalLM.from_pretrained(repo, {
     dtype: (llmSpec.modules.webgpu['model'] ?? 'q4f16') as 'q4f16',
     device: 'webgpu',
     progress_callback: (info) =>
@@ -164,7 +167,7 @@ worker.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       switch (request.type) {
         case 'load':
           language = request.language;
-          await load();
+          await load(request.llmRepo);
           break;
 
         case 'warmUp':

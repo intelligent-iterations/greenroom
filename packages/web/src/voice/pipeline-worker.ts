@@ -47,7 +47,11 @@ export class InferencePipeline {
   #audio?: AudioContext;
   #source?: AudioBufferSourceNode;
 
-  constructor(private language: 'en' | 'fr' = 'en') {
+  constructor(
+    private language: 'en' | 'fr' = 'en',
+    /** Hugging Face repo of the chosen interviewer model; manifest default if unset. */
+    private llmRepo?: string,
+  ) {
     this.#worker = new Worker(new URL('./inference.worker.ts', import.meta.url), {
       type: 'module',
     });
@@ -84,7 +88,7 @@ export class InferencePipeline {
         resolve: resolve as (v: never) => void,
         reject,
       });
-      this.#post({ type: 'load', language: this.language });
+      this.#post({ type: 'load', language: this.language, ...(this.llmRepo ? { llmRepo: this.llmRepo } : {}) });
     });
     return this.#loadPromise;
   }

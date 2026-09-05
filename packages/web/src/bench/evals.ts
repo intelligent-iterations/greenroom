@@ -18,6 +18,7 @@
  *
  * Query params:
  *   ?style=compact|full|both   (default: both)
+ *   ?model=<hf repo>           (default: the manifest's LLM)
  *   ?limit=N                   (default: all cases)
  *   ?view=1                    show the last saved run, do not re-run
  */
@@ -120,7 +121,11 @@ async function main() {
   state.styles = styles;
   show();
 
-  const pipeline = new InferencePipeline('en');
+  // Model is selectable so two candidates can be compared on identical cases —
+  // the only way to answer "is the bigger one actually better" with a number.
+  const modelRepo = params.get('model') ?? undefined;
+  state.model = modelRepo ?? '(manifest default)';
+  const pipeline = new InferencePipeline('en', modelRepo);
   await pipeline.load((p) => {
     state.stage = `loading ${p.stage} ${(p.progress * 100).toFixed(0)}%`;
     show();

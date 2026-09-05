@@ -494,3 +494,40 @@ progress {
   padding: 0.5rem 0.7rem;
   font-size: 0.85rem;
 }
+
+/* Model picker ------------------------------------------------------------ */
+
+.models {
+  margin: 0 0 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.models legend {
+  padding: 0 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.model {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.4rem 0;
+  cursor: pointer;
+}
+
+.model input {
+  margin-top: 0.3rem;
+  accent-color: var(--accent);
+}
+
+.model__note {
+  display: block;
+}
+
+.model--unavailable {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
