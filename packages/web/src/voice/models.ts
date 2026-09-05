@@ -18,9 +18,14 @@ import type { ModelDescriptor } from '@greenroom/shared';
  * Model, dtype and device match Hugging Face's `conversational-webgpu` example,
  * a published working in-browser voice chat on this stack.
  *
- * `vramMb` is the measured size of the exact quantised weight file. Latency
- * figures are filled in from `bench.html` on real hardware; see
- * docs/BENCHMARKS.md. `qualityScore` remains a seed value pending a live eval.
+ * `vramMb` is the measured size of the exact quantised weight file, and
+ * `firstTokenMsP50` is MEASURED by bench.html on Apple M-series / Metal-3 —
+ * steady state, meaning with the attention cache warm, which is what an ongoing
+ * conversation actually experiences. The opening turn is roughly twice that
+ * because it prefills the whole system prompt once.
+ *
+ * One machine is not a distribution; see docs/BENCHMARKS.md for the profiles
+ * still worth covering. `qualityScore` remains a seed value pending a live eval.
  */
 export const MODEL_CATALOGUE: ModelDescriptor[] = [
   {
@@ -31,7 +36,8 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     vendor: 'on-device',
     label: 'On-device (SmolLM2 1.7B)',
     residency: 'device',
-    firstTokenMsP50: 0,
+    // Measured: 929ms steady state, 1866ms on the opening turn.
+    firstTokenMsP50: 929,
     qualityScore: 0.6,
     costPerSessionUsd: 0,
     offlineCapable: true,

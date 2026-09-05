@@ -23,10 +23,8 @@ import {
   findScenario,
 } from '@greenroom/shared';
 import { detectCapabilities } from '../voice/capabilities.js';
-import { TransformersLanguageModel } from '../voice/llm-transformers.js';
 import { MODEL_CATALOGUE } from '../voice/models.js';
-import { WhisperRecognizer } from '../voice/stt-whisper.js';
-import { KokoroSynthesizer } from '../voice/tts-kokoro.js';
+import { InferencePipeline } from '../voice/pipeline-worker.js';
 
 interface TurnMeasurement {
   turn: number;
@@ -157,16 +155,12 @@ async function main(): Promise<void> {
     result.modelId = modelId;
     log(`model: ${modelId}`);
 
-    const recognizer = new WhisperRecognizer({ language: 'en' });
-    const model = new TransformersLanguageModel({ model: modelId });
-    const synthesizer = new KokoroSynthesizer();
+    // Measures the pipeline as the product runs it: one worker, main thread free.
+    const pipeline = new InferencePipeline('en');
+    const { recognizer, model, synthesizer } = pipeline;
 
     const loadStart = performance.now();
-    await Promise.all([
-      recognizer.load((p) => logProgress(`stt ${(p.progress * 100).toFixed(0)}%`)),
-      model.load((p) => logProgress(`llm ${(p.progress * 100).toFixed(0)}%`)),
-      synthesizer.load((p) => logProgress(`tts ${(p.progress * 100).toFixed(0)}%`)),
-    ]);
+    await pipeline.load((p) => logProgress(`${p.stage} ${(p.progress * 100).toFixed(0)}%`));
     result.loadMs = Math.round(performance.now() - loadStart);
     log(`loaded in ${result.loadMs}ms`);
     render();
@@ -196,6 +190,7 @@ async function main(): Promise<void> {
       let spoke = false;
       let tokens = 0;
       let decodeStart = 0;
+      let speakQueue: Promise<void> = Promise.resolve();
 
       for await (const delta of model.generate(history, { maxTokens: 160 })) {
         if (!firstTokenMs) {
@@ -211,20 +206,24 @@ async function main(): Promise<void> {
         for (const chunk of chunks) {
           if (!spoke) {
             // First audible sample of the turn: the number learners feel.
-            const t = performance.now();
-            await synthesizer.speak(chunk);
-            firstAudioMs = t - anchor;
+            firstAudioMs = performance.now() - anchor;
             spoke = true;
-          } else {
-            await synthesizer.speak(chunk);
           }
+          // Chained, never awaited inside this loop. Awaiting here would block
+          // decoding until the audio finished playing in real time, which is
+          // what the orchestrator deliberately avoids — and what made an earlier
+          // version of this benchmark report 2 tok/s for a model that does 90.
+          speakQueue = speakQueue.then(() => synthesizer.speak(chunk)).catch(() => {});
         }
       }
       const tail = buffer.trim();
-      if (tail) await synthesizer.speak(tail);
+      if (tail) speakQueue = speakQueue.then(() => synthesizer.speak(tail)).catch(() => {});
 
-      const turnaroundMs = performance.now() - anchor;
+      // Decode rate is measured over generation only. Turnaround is measured
+      // after playback drains, because that is what the learner experiences.
       const decodeSec = (performance.now() - decodeStart) / 1000;
+      await speakQueue;
+      const turnaroundMs = performance.now() - anchor;
 
       history.push({ role: 'assistant', content: reply.trim() });
       const measurement: TurnMeasurement = {

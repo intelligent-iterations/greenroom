@@ -8,7 +8,9 @@ import {
 import {
   AutoModelForCausalLM,
   AutoTokenizer,
+  InterruptableStoppingCriteria,
   TextStreamer,
+  type DynamicCache,
   type PreTrainedModel,
   type PreTrainedTokenizer,
 } from '@huggingface/transformers';
@@ -44,6 +46,17 @@ export class TransformersLanguageModel implements LanguageModel {
   #tokenizer?: PreTrainedTokenizer;
   #repo: string;
   #dtype: string;
+  /**
+   * Attention cache carried between turns.
+   *
+   * Without it every turn re-prefills the whole conversation, and the
+   * interviewer's system prompt alone is several hundred tokens — which is most
+   * of the delay before the first spoken word. With it, a turn only prefills
+   * what the learner just said.
+   */
+  #pastKeyValues: DynamicCache | undefined;
+  /** The conversation the cache belongs to, for detecting a reset. */
+  #cachedMessages: ChatMessage[] = [];
 
   constructor(options: TransformersLlmOptions = {}) {
     const spec = findStage('llm');
@@ -104,10 +117,25 @@ export class TransformersLanguageModel implements LanguageModel {
       throw new Error('TransformersLanguageModel.load() must be awaited before generate()');
     }
 
+    // The cache is only valid if this turn continues the conversation it was
+    // built from. A debrief, or a new session, starts from different text, and
+    // reusing the cache there would condition the reply on a conversation that
+    // is no longer in the prompt.
+    if (!this.#extendsCachedConversation(messages)) {
+      this.#pastKeyValues = undefined;
+    }
+
     const inputs = tokenizer.apply_chat_template(messages, {
       add_generation_prompt: true,
       return_dict: true,
     });
+
+    // Real interruption. Breaking out of the consumer loop stops us reading
+    // tokens but leaves the model decoding into a cache nobody will use, which
+    // wastes the GPU exactly when the next turn needs it. This stops decode.
+    const stopping = new InterruptableStoppingCriteria();
+    const onAbort = () => stopping.interrupt();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
 
     // transformers.js streams through a callback rather than an async iterator,
     // so tokens are queued here and drained by the loop below. Without the
@@ -130,12 +158,22 @@ export class TransformersLanguageModel implements LanguageModel {
     const done = model
       .generate({
         ...(inputs as object),
+        past_key_values: this.#pastKeyValues,
         max_new_tokens: options.maxTokens ?? 160,
         do_sample: true,
         temperature: options.temperature ?? 0.6,
         streamer,
+        stopping_criteria: stopping,
+        return_dict_in_generate: true,
+      })
+      .then((output: unknown) => {
+        // Keep the cache so the next turn skips re-prefilling the transcript.
+        this.#pastKeyValues = (output as { past_key_values?: DynamicCache })?.past_key_values;
       })
       .catch((err: unknown) => {
+        // A failed turn must not leave a cache describing a state the model
+        // never reached.
+        this.#pastKeyValues = undefined;
         console.error('generation failed', err);
       })
       .finally(() => {
@@ -162,9 +200,36 @@ export class TransformersLanguageModel implements LanguageModel {
     }
 
     await done;
+    options.signal?.removeEventListener('abort', onAbort);
+
+    // Record what the cache now represents: the prompt plus what was actually
+    // generated. On an interruption the model stopped early, so the cache no
+    // longer matches any transcript we will send again and is dropped.
+    if (options.signal?.aborted) {
+      this.#pastKeyValues = undefined;
+      this.#cachedMessages = [];
+    } else {
+      this.#cachedMessages = [...messages];
+    }
+  }
+
+  /** True when `messages` begins with the conversation the cache was built on. */
+  #extendsCachedConversation(messages: ChatMessage[]): boolean {
+    if (this.#pastKeyValues === undefined) return false;
+    if (messages.length < this.#cachedMessages.length) return false;
+    return this.#cachedMessages.every(
+      (cached, i) => messages[i]?.role === cached.role && messages[i]?.content === cached.content,
+    );
+  }
+
+  /** Drops the attention cache. Call when starting a new conversation. */
+  resetCache(): void {
+    this.#pastKeyValues = undefined;
+    this.#cachedMessages = [];
   }
 
   async unload(): Promise<void> {
+    this.resetCache();
     await this.#model?.dispose();
     this.#model = undefined;
     this.#tokenizer = undefined;

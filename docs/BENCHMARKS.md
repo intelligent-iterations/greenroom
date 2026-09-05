@@ -50,6 +50,38 @@ We shipped a unit test asserting the model id existed in `prebuiltAppConfig`. It
 passed, and the model still could not load. Verifying the wrong thing is worse
 than not verifying, because it buys confidence.
 
+## Measured results
+
+Apple M-series, Metal-3, Chrome, 10 threads, `maxBufferSize` 4095MB. Foreground
+tab, preview build, models warm in the browser cache. Stack: Whisper base
+(fp32 encoder + decoder) -> SmolLM2 1.7B q4f16 -> Kokoro 82M fp32, all in one
+worker.
+
+| | Opening turn | Steady state |
+|---|---|---|
+| Speech recognition | 510 ms | 495 ms |
+| First token | 1866 ms | **929 ms** |
+| **First audio** | 1956 ms | **1197 ms** |
+| Decode | 42 tok/s | 42 tok/s |
+
+Cold load of all three models: ~295 s on a first visit, ~3.4 s from cache.
+Shader warm-up: ~1.3 s, paid during the loading screen rather than on the
+opening question.
+
+Two things this shows:
+
+- **The attention cache halves time-to-first-token.** The opening turn prefills
+  the whole system prompt; every turn after it prefills only what the learner
+  just said. 1866 ms -> 929 ms. Steady state is what a conversation actually
+  feels like, so it is the number the catalogue records.
+- **First audio lands at ~1.2 s in steady state**, inside the pipeline's
+  "acceptable" band and outside "good". Usable as a conversation, not yet
+  instant. The remaining cost is roughly half recognition and half prefill.
+
+The largest untested variable is a real microphone. Every number here comes from
+pre-recorded utterances; endpointing latency and barge-in responsiveness with
+live speech are not measured.
+
 ## Status
 
 **Latency figures in the model catalogue are measured on a single machine**

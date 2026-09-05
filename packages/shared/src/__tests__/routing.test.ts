@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, selectModel, type ModelDescriptor, type RoutingPolicy } from '../routing.js';
+import {
+  DEFAULT_POLICY,
+  REALTIME_FIRST_TOKEN_BUDGET_MS,
+  selectModel,
+  type ModelDescriptor,
+  type RoutingPolicy,
+} from '../routing.js';
 
 const onDevice: ModelDescriptor = {
   id: 'qwen3.5-2b-webgpu',
@@ -57,15 +63,15 @@ describe('selectModel', () => {
     // is worse than a smaller one that answers in time.
     const slowButSmart: ModelDescriptor = {
       ...onDevice,
-      id: 'qwen3.5-4b-webgpu',
-      firstTokenMsP50: 620,
+      id: 'bigger-but-slower',
+      firstTokenMsP50: 1400,
       qualityScore: 0.79,
     };
     const d = selectModel([slowButSmart, onDevice], DEFAULT_POLICY, env);
     expect(d.selected?.id).toBe('qwen3.5-2b-webgpu');
     expect(d.rejected).toContainEqual({
-      id: 'qwen3.5-4b-webgpu',
-      reason: 'first-token 620ms exceeds budget 400ms',
+      id: 'bigger-but-slower',
+      reason: `first-token 1400ms exceeds budget ${REALTIME_FIRST_TOKEN_BUDGET_MS}ms`,
     });
   });
 
@@ -128,15 +134,15 @@ describe('selectModel', () => {
       ...DEFAULT_POLICY,
       requireOnDevice: false,
       allowedResidencies: [],
-      maxFirstTokenMs: 400,
+      maxFirstTokenMs: 500,
     };
     const d = selectModel(all, policy, env);
-    // Whichever model wins, it must be one that fits the budget, and the one
-    // that does not must be rejected for that reason rather than silently.
-    expect(d.selected?.firstTokenMsP50).toBeLessThanOrEqual(400);
+    // Whichever model wins, it must fit the budget, and the one that does not
+    // must be rejected for that reason rather than silently dropped.
+    expect(d.selected?.firstTokenMsP50).toBeLessThanOrEqual(500);
     expect(d.rejected).toContainEqual({
       id: 'azure-gpt-4o-mini',
-      reason: 'first-token 610ms exceeds budget 400ms',
+      reason: 'first-token 610ms exceeds budget 500ms',
     });
   });
 });

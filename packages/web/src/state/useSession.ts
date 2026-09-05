@@ -8,11 +8,9 @@ import {
   type RoutingPolicy,
 } from '@greenroom/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ensureUser } from '../data/firebase.js';
 import { detectCapabilities, type DeviceCapabilities } from '../voice/capabilities.js';
 import { MODEL_CATALOGUE } from '../voice/models.js';
 import { InterviewSession } from '../voice/session.js';
-import { WebSpeechSynthesizer } from '../voice/tts-webspeech.js';
 import { useAppStore } from './store.js';
 
 /**
@@ -72,43 +70,25 @@ export function useSession() {
 
       store.resetSession();
 
-      // Every heavy adapter is imported here rather than at module scope.
-      // Statically, transformers.js + WebLLM + Kokoro are about 9 MB of
-      // JavaScript, which would be downloaded before the setup screen could
-      // render a button. Deferring them to the moment a session actually
-      // starts keeps first paint to the shell, and the cloud path never pays
-      // for the on-device runtimes it does not use.
-      const model = selected.vendor === 'on-device'
-        ? await import('../voice/llm-transformers.js').then(
-            (m) => new m.TransformersLanguageModel({ model: selected.id }),
-          )
-        : await import('../voice/llm-cloud.js').then(
-            (m) =>
-              new m.CloudLanguageModel({
-                model: selected.id,
-                endpoint: '/api/generate',
-                getAuthToken: async () => (await ensureUser())?.getIdToken(),
-              }),
-          );
+      // All three models run in one worker. Keeping inference off the main
+      // thread is what makes barge-in possible at all: while the main thread is
+      // blocked the VAD cannot deliver a speech event, so the learner cannot
+      // interrupt. Imported lazily so the setup screen does not pay for it.
+      const { InferencePipeline } = await import('../voice/pipeline-worker.js');
+      const pipeline = new InferencePipeline(scenario.language);
 
-      // Kokoro when the GPU can carry it AND the scenario is English — v1.0
-      // has no French voice, and on WASM it competes with Whisper for the same
-      // threads and pushes first-audio past two seconds, which is worse for the
-      // learner than a plainer platform voice.
-      const useNeuralVoice = capabilities?.hasWebGpu && scenario.language === 'en';
-      const synthesizer = useNeuralVoice
-        ? await import('../voice/tts-kokoro.js').then((m) => new m.KokoroSynthesizer())
-        : new WebSpeechSynthesizer({ language: scenario.language });
-
-      const { WhisperRecognizer } = await import('../voice/stt-whisper.js');
+      // Called synchronously enough after the button click to still count as a
+      // user gesture. Without this the AudioContext stays suspended and the
+      // interviewer is inaudible, with nothing logged to explain why.
+      await pipeline.primeAudio();
 
       const session = new InterviewSession({
         scenario,
         learner,
         stages: {
-          recognizer: new WhisperRecognizer({ language: scenario.language }),
-          model,
-          synthesizer,
+          recognizer: pipeline.recognizer,
+          model: pipeline.model,
+          synthesizer: pipeline.synthesizer,
         },
       });
 

@@ -403,6 +403,20 @@ Full detail in [infra/README.md](infra/README.md); the reasoning is in
 This is a portfolio build, and I would rather be precise about its edges than
 have you find them.
 
+**Measured on real hardware** (Apple M-series, Chrome, foreground tab, warm
+cache), running the production adapters through `bench.html`:
+
+| | Opening turn | Steady state |
+|---|---|---|
+| Speech recognition | 510 ms | 495 ms |
+| First token | 1866 ms | **929 ms** |
+| **First audio** | 1956 ms | **1197 ms** |
+| Decode | 42 tok/s | 42 tok/s |
+
+Reusing the attention cache between turns halves time-to-first-token, so an
+ongoing conversation replies in about 1.2 s. Full detail and method in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
 **Verified — I ran this:**
 
 - 103 unit tests across four packages, including the pipeline concurrency:
@@ -434,11 +448,11 @@ have you find them.
 
 **Not verified — be appropriately sceptical:**
 
-- **I have not run the full voice loop on real hardware with a real
-  microphone.** The stage adapters are written against the installed library
-  versions and typecheck against their real definitions, but WebGPU model
-  loading, end-to-end latency and echo-cancellation behaviour are exactly the
-  things that only reveal themselves on a device.
+- **The loop has never run against a real microphone.** Every measurement uses
+  pre-recorded utterances. VAD initialisation is verified against a synthetic
+  stream (`vadcheck.html`), but endpointing quality, echo cancellation and
+  barge-in responsiveness with live speech are unmeasured — and barge-in on
+  laptop speakers is where I would expect trouble first.
 - **The latency and quality numbers in the model catalogue are seed values, not
   measurements.** Their *ordering* is grounded — model ids and VRAM figures are
   verified against WebLLM's own records by a test, and quality follows the
