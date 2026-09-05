@@ -69,7 +69,7 @@ Open the printed URL in a Chromium-based browser or Safari 18+, allow
 microphone access, and start talking.
 
 The first run downloads roughly 1.2 GB of model weights (Whisper for speech
-recognition, Qwen3 1.7B for the interviewer, Kokoro for the voice) and caches
+recognition, Qwen3.5 2B for the interviewer, Kokoro for the voice) and caches
 them in the browser. After that it works with the network off.
 
 **Headphones are strongly recommended.** The microphone stays open while the
@@ -149,6 +149,35 @@ decimals, abbreviations, short fragments — under test).
 audio in the same tick. Being interruptible is most of what makes a voice agent
 feel like a conversation rather than a phone tree.
 
+### Making it feel realtime
+
+Three things beyond the cascade itself, all aimed at the gap between the learner
+falling silent and the first spoken word:
+
+**Latency is a hard constraint on model choice, not a preference.** The router
+rejects any model whose first-token latency exceeds the budget the pipeline can
+afford, then picks the *best* model among what is left. A larger model is always
+available and always better; the reason not to use it is that a reply which
+arrives late stops being a conversation. When the 4B is rejected for being
+620ms to first token, the UI says so.
+
+**The interviewer is a reasoning model, told firmly not to reason.** Every
+Qwen3.5 variant thinks before answering by default. For a spoken interviewer
+that is strictly bad — it adds seconds of silence, and if any of it escapes, the
+synthesiser reads the model's private deliberation aloud in the interviewer's
+voice. The adapter disables thinking *and* filters `<think>` blocks out of the
+token stream, because the flag is per-vendor and silently ignored by models that
+do not implement it. The filter is stateful, because tags arrive split across
+deltas.
+
+**The first chunk of a turn may break at a clause.** Normally audio waits for a
+complete sentence, which sounds better. Until a turn has made any sound, a comma
+will do — starting a sentence earlier is worth more than the prosody it costs.
+Once it is speaking, sentence boundaries resume.
+
+There is also a warm-up: the model runs one throwaway generation during the
+loading screen so shader compilation does not land on the opening question.
+
 Barge-in creates its own problem: the microphone is open while the interviewer
 talks, so the interviewer hears itself and interrupts itself, and the session
 livelocks on turn one. That is handled in two places — the audio stream is
@@ -213,7 +242,7 @@ axis that actually decides deployments in this sector:
 
 | Model | Residency | Offline |
 |---|---|---|
-| Qwen3 1.7B / Llama 3.2 1B (WebLLM) | on device | yes |
+| Qwen3.5 2B / 0.8B / 4B, Llama 3.2 1B (WebLLM) | on device | yes |
 | Azure OpenAI (Canada Central) | Canadian region | no |
 | Google Gemini Flash | US region | no |
 
@@ -369,7 +398,10 @@ have you find them.
   loading, end-to-end latency and echo-cancellation behaviour are exactly the
   things that only reveal themselves on a device.
 - **The latency and quality numbers in the model catalogue are seed values, not
-  measurements.** They encode the ordering the design assumes so that routing
+  measurements.** Their *ordering* is grounded — model ids and VRAM figures are
+  verified against WebLLM's own records by a test, and quality follows the
+  published intelligence ranking within the Qwen3.5 family — but the absolute
+  figures are assumptions. They encode the ordering the design assumes so that routing
   behaves sensibly before anyone has benchmarked anything. They are labelled as
   such in the source. [docs/BENCHMARKS.md](docs/BENCHMARKS.md) describes the
   measurement to run; no measured run is committed.

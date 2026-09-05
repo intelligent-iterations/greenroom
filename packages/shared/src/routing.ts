@@ -44,6 +44,15 @@ export interface ModelDescriptor {
   offlineCapable: boolean;
   /** Set when the backend requires hardware the browser may not have. */
   requiresWebGpu?: boolean;
+  /**
+   * GPU memory the weights need, in MB, as published by the runtime.
+   *
+   * The one number in this descriptor that is measured rather than assumed: it
+   * comes from WebLLM's own model records. It matters because three models
+   * share one tab, so a model that fits alone can still fail next to the
+   * recogniser and the voice.
+   */
+  vramMb?: number;
 }
 
 export interface RoutingPolicy {
@@ -55,12 +64,27 @@ export interface RoutingPolicy {
   maxFirstTokenMs: number;
   /** Tie-break: prefer the better model over the cheaper/faster one. */
   preferQuality: boolean;
+  /**
+   * GPU memory available to the language model after the other on-device
+   * stages have taken theirs, in MB. Undefined means do not filter on memory.
+   */
+  vramBudgetMb?: number;
 }
 
 export interface RuntimeEnvironment {
   hasWebGpu: boolean;
   online: boolean;
 }
+
+/**
+ * Rough GPU memory the non-LLM on-device stages occupy.
+ *
+ * Used to turn a device's total budget into what is actually left for the
+ * interviewer model. Approximate on purpose — the point is to stop the router
+ * selecting a model that cannot co-exist with the rest of the pipeline, not to
+ * predict allocation precisely.
+ */
+export const NON_LLM_STAGE_VRAM_MB = 700;
 
 export interface RoutingDecision {
   selected?: ModelDescriptor;
@@ -70,11 +94,27 @@ export interface RoutingDecision {
   rejected: Array<{ id: string; reason: string }>;
 }
 
+/**
+ * First-token budget for a spoken turn.
+ *
+ * Derived from the pipeline budget rather than picked: LATENCY_BUDGET allows
+ * ~800ms from the learner falling silent to the first audible word, and speech
+ * recognition and the first synthesis both have to happen inside it. That
+ * leaves roughly this much for the model to produce its first token.
+ *
+ * Treating it as a hard constraint is the whole design of the realtime path.
+ * A bigger model is always available and always better; the reason not to use
+ * it is that a reply which arrives late stops being a conversation. So latency
+ * filters, and quality decides among whatever is left.
+ */
+export const REALTIME_FIRST_TOKEN_BUDGET_MS = 400;
+
 export const DEFAULT_POLICY: RoutingPolicy = {
   requireOnDevice: true,
   allowedResidencies: ['device'],
-  maxFirstTokenMs: 2000,
-  preferQuality: false,
+  maxFirstTokenMs: REALTIME_FIRST_TOKEN_BUDGET_MS,
+  // Best model that still answers fast enough to feel like a conversation.
+  preferQuality: true,
 };
 
 /**
@@ -107,6 +147,17 @@ export function selectModel(
     }
     if (!c.offlineCapable && !env.online) {
       rejected.push({ id: c.id, reason: 'offline and model requires network' });
+      continue;
+    }
+    if (
+      policy.vramBudgetMb !== undefined &&
+      c.vramMb !== undefined &&
+      c.vramMb > policy.vramBudgetMb
+    ) {
+      rejected.push({
+        id: c.id,
+        reason: `needs ${c.vramMb}MB of GPU memory, only ${policy.vramBudgetMb}MB available for the model`,
+      });
       continue;
     }
     if (c.firstTokenMsP50 > policy.maxFirstTokenMs) {

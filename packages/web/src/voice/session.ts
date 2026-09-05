@@ -144,6 +144,11 @@ export class InterviewSession extends Emitter<SessionEvents> {
         this.#vad = new VoiceActivityDetector();
       }
 
+      // Compile shaders and prefill a realistic prompt while the learner is
+      // still looking at the loading screen. Without this the cost lands on the
+      // opening question — the first thing they ever hear from the product.
+      await this.#stages.model.warmUp?.(this.prompt.system);
+
       await this.#vad.start({
         onSpeechStart: () => this.#handleSpeechStart(),
         onSpeechEnd: (audio) => void this.#handleSpeechEnd(audio),
@@ -217,6 +222,9 @@ export class InterviewSession extends Emitter<SessionEvents> {
     let full = '';
     let buffer = '';
     let firstToken = true;
+    // Tracks the clause-break allowance within this turn. Distinct from the
+    // timing field, which is only set once playback actually begins.
+    let spokeThisTurn = false;
 
     try {
       const stream = this.#stages.model.generate(this.#buildMessages(), {
@@ -236,9 +244,17 @@ export class InterviewSession extends Emitter<SessionEvents> {
         buffer += delta;
         this.emit('interviewerDelta', full);
 
-        const [chunks, remainder] = splitSpeakableChunks(buffer);
+        // Until this turn has made a sound, accept a clause boundary so audio
+        // starts sooner. Once it is speaking, hold out for whole sentences —
+        // they carry better prosody and the learner is no longer waiting.
+        const [chunks, remainder] = splitSpeakableChunks(buffer, {
+          allowClauseBreak: this.#timings?.firstAudioMs === undefined && !spokeThisTurn,
+        });
         buffer = remainder;
-        for (const chunk of chunks) this.#enqueueSpeech(chunk, abort, anchor);
+        for (const chunk of chunks) {
+          spokeThisTurn = true;
+          this.#enqueueSpeech(chunk, abort, anchor);
+        }
       }
 
       // Whatever did not end in terminal punctuation still has to be spoken.

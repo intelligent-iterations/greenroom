@@ -1,9 +1,11 @@
 import {
   DEFAULT_POLICY,
+  NON_LLM_STAGE_VRAM_MB,
   findScenario,
   selectModel,
   type LearnerState,
   type RoutingDecision,
+  type RoutingPolicy,
 } from '@greenroom/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ensureUser } from '../data/firebase.js';
@@ -34,14 +36,26 @@ export function useSession() {
   // the setup screen can explain the choice before anything is downloaded.
   useEffect(() => {
     if (!capabilities) return;
-    const policy = store.allowCloud
+
+    // What is left for the interviewer model once the recogniser and the voice
+    // have taken their share of the same GPU. Undefined when the device gives
+    // us nothing to go on, in which case the router does not filter on memory
+    // and WebLLM's own load-time check becomes the backstop.
+    const vramBudgetMb =
+      capabilities.maxBufferMb === undefined
+        ? undefined
+        : Math.max(0, capabilities.maxBufferMb - NON_LLM_STAGE_VRAM_MB);
+
+    const base: RoutingPolicy = store.allowCloud
       ? { ...DEFAULT_POLICY, requireOnDevice: false, allowedResidencies: [], preferQuality: true }
-      : DEFAULT_POLICY;
+      : { ...DEFAULT_POLICY, preferQuality: true };
+
     setRouting(
-      selectModel(MODEL_CATALOGUE, policy, {
-        hasWebGpu: capabilities.hasWebGpu,
-        online: navigator.onLine,
-      }),
+      selectModel(
+        MODEL_CATALOGUE,
+        { ...base, ...(vramBudgetMb !== undefined ? { vramBudgetMb } : {}) },
+        { hasWebGpu: capabilities.hasWebGpu, online: navigator.onLine },
+      ),
     );
   }, [capabilities, store.allowCloud]);
 

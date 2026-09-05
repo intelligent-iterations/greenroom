@@ -76,6 +76,9 @@ export class FakeRecognizer implements SpeechRecognizer {
  */
 export class ScriptedModel implements LanguageModel {
   readonly id = 'fake-llm';
+  /** Assigned by tests that assert warm-up ordering; absent by default so the
+   *  optional-method path is exercised too. */
+  warmUp?: (systemPrompt: string) => Promise<void>;
   receivedMessages: ChatMessage[][] = [];
   #pending: string[] = [];
   #gate = deferred();

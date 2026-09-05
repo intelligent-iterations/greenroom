@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, selectModel, type ModelDescriptor, type RoutingPolicy } from '../routing.js';
 
 const onDevice: ModelDescriptor = {
-  id: 'qwen3-1.7b-webgpu',
+  id: 'qwen3.5-2b-webgpu',
   vendor: 'on-device',
   label: 'On-device',
   residency: 'device',
-  firstTokenMsP50: 420,
+  firstTokenMsP50: 380,
   qualityScore: 0.62,
   costPerSessionUsd: 0,
   offlineCapable: true,
@@ -41,7 +41,7 @@ const env = { hasWebGpu: true, online: true };
 describe('selectModel', () => {
   it('keeps everything on-device under the default policy', () => {
     const d = selectModel(all, DEFAULT_POLICY, env);
-    expect(d.selected?.id).toBe('qwen3-1.7b-webgpu');
+    expect(d.selected?.id).toBe('qwen3.5-2b-webgpu');
     expect(d.rejected.map((r) => r.id)).toEqual(['azure-gpt-4o-mini', 'gemini-3-flash']);
   });
 
@@ -52,11 +52,44 @@ describe('selectModel', () => {
     expect(d.rejected[0]?.reason).toMatch(/WebGPU/);
   });
 
+  it('rejects an on-device model too slow to hold a conversation', () => {
+    // The realtime constraint doing its job: a better model that answers late
+    // is worse than a smaller one that answers in time.
+    const slowButSmart: ModelDescriptor = {
+      ...onDevice,
+      id: 'qwen3.5-4b-webgpu',
+      firstTokenMsP50: 620,
+      qualityScore: 0.79,
+    };
+    const d = selectModel([slowButSmart, onDevice], DEFAULT_POLICY, env);
+    expect(d.selected?.id).toBe('qwen3.5-2b-webgpu');
+    expect(d.rejected).toContainEqual({
+      id: 'qwen3.5-4b-webgpu',
+      reason: 'first-token 620ms exceeds budget 400ms',
+    });
+  });
+
+  it('rejects a model that will not fit in the memory left by the other stages', () => {
+    const big: ModelDescriptor = { ...onDevice, id: 'big', vramMb: 3868 };
+    const small: ModelDescriptor = { ...onDevice, id: 'small', vramMb: 1630, qualityScore: 0.5 };
+    const d = selectModel([big, small], { ...DEFAULT_POLICY, vramBudgetMb: 2000 }, env);
+    expect(d.selected?.id).toBe('small');
+    expect(d.rejected[0]?.reason).toMatch(/GPU memory/);
+  });
+
+  it('does not filter on memory when the device reports no budget', () => {
+    const big: ModelDescriptor = { ...onDevice, id: 'big', vramMb: 99_000 };
+    expect(selectModel([big], DEFAULT_POLICY, env).selected?.id).toBe('big');
+  });
+
   it('excludes non-Canadian residency when the policy demands it', () => {
     const policy: RoutingPolicy = {
       ...DEFAULT_POLICY,
       requireOnDevice: false,
       allowedResidencies: ['device', 'ca-region'],
+      // Relaxed: this case is about residency, and the realtime default would
+      // otherwise reject the hosted models on latency before residency applied.
+      maxFirstTokenMs: 2000,
     };
     const d = selectModel(all, policy, { hasWebGpu: false, online: true });
     expect(d.selected?.id).toBe('azure-gpt-4o-mini');
@@ -71,7 +104,13 @@ describe('selectModel', () => {
       qualityScore: 0.94,
       firstTokenMsP50: 900,
     };
-    const base: RoutingPolicy = { ...DEFAULT_POLICY, requireOnDevice: false, allowedResidencies: [] };
+    const base: RoutingPolicy = {
+      ...DEFAULT_POLICY,
+      requireOnDevice: false,
+      allowedResidencies: [],
+      maxFirstTokenMs: 2000,
+      preferQuality: false,
+    };
     expect(selectModel([slowSmart, gemini], base, env).selected?.id).toBe('gemini-3-flash');
     expect(selectModel([slowSmart, gemini], { ...base, preferQuality: true }, env).selected?.id).toBe(
       'azure-gpt-4o',
@@ -92,7 +131,12 @@ describe('selectModel', () => {
       maxFirstTokenMs: 400,
     };
     const d = selectModel(all, policy, env);
-    expect(d.selected?.id).toBe('gemini-3-flash');
-    expect(d.rejected.some((r) => /exceeds budget/.test(r.reason))).toBe(true);
+    // Whichever model wins, it must be one that fits the budget, and the one
+    // that does not must be rejected for that reason rather than silently.
+    expect(d.selected?.firstTokenMsP50).toBeLessThanOrEqual(400);
+    expect(d.rejected).toContainEqual({
+      id: 'azure-gpt-4o-mini',
+      reason: 'first-token 610ms exceeds budget 400ms',
+    });
   });
 });

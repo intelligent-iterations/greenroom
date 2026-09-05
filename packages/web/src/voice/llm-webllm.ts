@@ -1,4 +1,10 @@
-import type { ChatMessage, GenerateOptions, LanguageModel, LoadProgress } from '@greenroom/shared';
+import {
+  ThinkingStripper,
+  type ChatMessage,
+  type GenerateOptions,
+  type LanguageModel,
+  type LoadProgress,
+} from '@greenroom/shared';
 import { CreateMLCEngine, type MLCEngine } from '@mlc-ai/web-llm';
 
 /**
@@ -40,6 +46,38 @@ export class WebLlmModel implements LanguageModel {
     });
   }
 
+  /**
+   * Runs one throwaway generation to force shader compilation.
+   *
+   * The first generation after load compiles GPU kernels, and that cost would
+   * otherwise land on the opening question. The system prompt is passed so the
+   * warm-up prefills a realistic prompt length rather than a two-token one.
+   *
+   * Failure here is deliberately swallowed: a warm-up is an optimisation, and
+   * refusing to start a session because the optimisation failed would be worse
+   * than a slow first turn.
+   */
+  async warmUp(systemPrompt: string): Promise<void> {
+    const engine = this.#engine;
+    if (!engine) return;
+    try {
+      await engine.chat.completions.create({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: 'Hello.' },
+        ],
+        stream: false,
+        max_tokens: 1,
+        temperature: 0,
+        extra_body: { enable_thinking: false },
+      });
+      // The warm-up turn must not be part of the interview's context.
+      await engine.resetChat();
+    } catch (err) {
+      console.warn('model warm-up failed; first turn will be slower', err);
+    }
+  }
+
   async *generate(messages: ChatMessage[], options: GenerateOptions = {}): AsyncIterable<string> {
     const engine = this.#engine;
     if (!engine) throw new Error('WebLlmModel.load() must be awaited before generate()');
@@ -51,13 +89,30 @@ export class WebLlmModel implements LanguageModel {
       // phrasings across a session and learners notice within two turns.
       temperature: options.temperature ?? 0.6,
       max_tokens: options.maxTokens ?? 160,
+      // Qwen3-family models reason before answering unless told not to. For a
+      // spoken interviewer that is strictly bad: it adds seconds of silence
+      // before the first word and produces nothing the learner should hear.
+      // WebLLM implements this by prepending an empty think block, so the
+      // stripper below still has something to remove.
+      extra_body: { enable_thinking: false },
     });
+
+    // Second line of defence. `enable_thinking` is silently ignored by models
+    // that do not implement it, and reasoning text reaching the synthesiser
+    // would be read aloud to the learner in the interviewer's voice.
+    const stripper = new ThinkingStripper();
 
     try {
       for await (const chunk of stream) {
         if (options.signal?.aborted) break;
         const delta = chunk.choices[0]?.delta?.content;
-        if (delta) yield delta;
+        if (!delta) continue;
+        const speakable = stripper.push(delta);
+        if (speakable) yield speakable;
+      }
+      if (!options.signal?.aborted) {
+        const tail = stripper.flush();
+        if (tail) yield tail;
       }
     } finally {
       // Barge-in leaves the engine mid-decode. Without this the next turn

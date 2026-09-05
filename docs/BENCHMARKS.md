@@ -68,8 +68,18 @@ Hardware profiles worth covering, in priority order:
   Whisper that stays usable on the CPU path. Small is more accurate; if its
   latency fits on profile 1, it should win. Run both through the eval set and
   compare word error rate on accented speech specifically, not overall.
-- **Qwen3 1.7B vs Llama 3.2 1B.** Quality against latency and memory, on
-  profile 1, with the other two stages resident.
+- **Qwen3.5 2B vs 0.8B vs 4B.** The one that decides the product's feel. The
+  router currently filters at 400ms to first token using seed values; measuring
+  the real figures on profile 1, with Whisper and Kokoro resident, either
+  confirms the default or moves it. Report first-token and decode throughput
+  separately — a model can start fast and then speak too slowly to keep up with
+  the synthesiser.
+- **Does disabling thinking actually eliminate the latency?** Compare
+  `enable_thinking: false` against the default on identical prompts, measuring
+  first token and total turn. This is the largest single latency variable in the
+  current design and it has not been measured.
+- **Ministral 3 3B and Phi-4-mini** as alternatives to Qwen3.5 2B: both are in
+  the prebuilt list, both are larger, and neither has been through the eval set.
 - **Kokoro dtype.** fp32 vs q8 on WebGPU: does the quantised voice free enough
   memory to matter, and is the quality cost audible?
 - **VAD `redemptionMs`.** Currently 800ms, reasoned rather than measured. Wants

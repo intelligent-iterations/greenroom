@@ -220,6 +220,73 @@ describe('InterviewSession learner turns', () => {
   });
 });
 
+describe('InterviewSession realtime behaviour', () => {
+  it('warms the model up before opening the microphone', async () => {
+    const { session, model, vad } = build();
+    const order: string[] = [];
+    model.warmUp = async () => void order.push('warmUp');
+    const realStart = vad.start.bind(vad);
+    vad.start = async (h) => {
+      order.push('vad.start');
+      return realStart(h);
+    };
+
+    const started = session.start();
+    await flush();
+    model.script('An opening question about your work.');
+    await started;
+
+    expect(order).toEqual(['warmUp', 'vad.start']);
+  });
+
+  it('starts audio at a clause boundary before the first sentence completes', async () => {
+    const { session, model, synthesizer } = build();
+    const started = session.start();
+    await flush();
+
+    // No terminal punctuation yet — without clause breaking this is silence.
+    model.push('Thanks for making the time, ');
+    await flush();
+    expect(synthesizer.spoken).toEqual(['Thanks for making the time,']);
+
+    model.push('walk me through a system you owned. ');
+    model.finish();
+    await started;
+  });
+
+  it('reverts to sentence boundaries once the turn is already speaking', async () => {
+    const { session, model, synthesizer } = build();
+    const started = session.start();
+    await flush();
+
+    model.push('Thanks for making the time, ');
+    await flush();
+    model.push('and welcome, ');
+    await flush();
+    // The second clause is held: audio is already playing, so prosody wins.
+    expect(synthesizer.spoken).toEqual(['Thanks for making the time,']);
+
+    model.push('walk me through the migration. ');
+    await flush();
+    expect(synthesizer.spoken).toEqual([
+      'Thanks for making the time,',
+      'and welcome, walk me through the migration.',
+    ]);
+
+    model.finish();
+    await started;
+  });
+
+  it('tolerates a model with no warm-up support', async () => {
+    const { session, model } = build();
+    expect(model.warmUp).toBeUndefined();
+    const started = session.start();
+    await flush();
+    model.script('An opening question about your work.');
+    await expect(started).resolves.toBeUndefined();
+  });
+});
+
 describe('InterviewSession lifecycle', () => {
   it('ends and releases the microphone at the turn budget', async () => {
     const { session, vad, model } = build();
