@@ -1,0 +1,63 @@
+name: Live evaluation
+
+# The expensive half of the harness: real vendor calls, rubric scoring by an
+# LLM judge. Run before a release, after a prompt change, or to compare vendors
+# on identical inputs. Kept off the PR path deliberately — gating every commit
+# on a paid, non-deterministic judge trains people to ignore the gate.
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Model under test
+        type: choice
+        options: [azure, gemini]
+        default: azure
+      judge:
+        description: Judge model
+        type: choice
+        options: [gemini, azure]
+        default: gemini
+      write_baseline:
+        description: Record this run as the new baseline
+        type: boolean
+        default: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    environment: evaluation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:shared
+
+      - name: Run evaluation
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          pnpm --filter @greenroom/evals exec node --experimental-strip-types src/cli.ts \
+            --backend=${{ inputs.backend }} \
+            --judge=${{ inputs.judge }} \
+            --gate \
+            ${{ inputs.write_baseline && '--write-baseline --record' || '' }}
+
+      - name: Summarise
+        if: always()
+        run: cat evals/reports/latest.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report-${{ inputs.backend }}
+          path: evals/reports/

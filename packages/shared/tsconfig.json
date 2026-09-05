@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // DOM is here only for the handful of web-platform globals the pipeline
+    // interfaces name (AbortSignal, ReadableStream). Node 22 provides them at
+    // runtime, so this package stays usable from both surfaces.
+    "lib": ["ES2023", "DOM"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true
+  },
+  "include": ["src"],
+  "exclude": ["src/__tests__"]
+}

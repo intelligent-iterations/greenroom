@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.output/
+*.tsbuildinfo
+
+# local env / secrets
+.env
+.env.*
+!.env.example
+serviceAccount*.json
+
+# firebase
+.firebase/
+firebase-debug.log
+ui-debug.log
+firestore-debug.log
+
+# eval output
+evals/reports/*
+!evals/reports/.gitkeep
+
+.DS_Store
+.vscode/
+.idea/

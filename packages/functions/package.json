@@ -1,0 +1,29 @@
+{
+  "name": "@greenroom/functions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "serve": "pnpm build && firebase emulators:start --only functions,firestore",
+    "deploy": "pnpm build && firebase deploy --only functions",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@greenroom/shared": "workspace:*",
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

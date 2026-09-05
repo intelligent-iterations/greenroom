@@ -1,0 +1,175 @@
+# Evaluation
+
+## What this harness is for
+
+To answer one question on every change: **did the interviewer get worse?**
+
+That question is hard because the output is generative and there is no correct
+answer to diff against. A good interviewer turn has properties, not a value. So
+the harness scores properties, in two layers with a strict division of labour.
+
+## Layer 1: deterministic checks
+
+`evals/src/checks.ts`. Runs on every turn, costs nothing, never flakes.
+
+| Check | Critical | Catches |
+|---|---|---|
+| `non_empty` | yes | the model produced nothing |
+| `speakable` | yes | markdown, bullets, emoji, `%`, `~`, `<`, `>` — things a synthesiser reads wrong or skips |
+| `no_answer_leakage` | yes | "a strong answer would…", "you could mention…", "make sure to mention…" |
+| `in_character` | yes | "as an AI", "my instructions say", "this is a practice session" |
+| `language` | yes | a French scenario answered in English |
+| `length` | no | turns too long to listen to (>75 words) |
+| `single_question` | no | three questions stacked into one spoken turn |
+| `no_mid_session_feedback` | no | grading the candidate before the debrief |
+
+Every pattern is tuned for **precision over recall**. A false positive here
+fails a build, so a check that is merely usually right does not belong; softer
+cases are left to the judge. Every check has tests proving it fires on bad input
+and stays quiet on good input — a check that can never fail is worse than no
+check, because it looks like coverage.
+
+## Layer 2: the rubric judge
+
+`packages/shared/src/rubric.ts` defines eight dimensions with written anchors at
+1, 3 and 5. The anchors are the point: an unanchored 1-5 scale invites a judge
+to cluster everything near the middle, and a rubric that returns 4 for
+everything discriminates nothing. Anchoring is also what makes human calibration
+possible, since two raters can only agree on a scale that says what its numbers
+mean.
+
+| Dimension | Weight | Critical |
+|---|---|---|
+| `role_fidelity` | 1 | |
+| `answer_leakage` | 2 | yes |
+| `difficulty_calibration` | 1.5 | |
+| `language_calibration` | 1 | |
+| `coverage_progress` | 1 | |
+| `followup_quality` | 1.5 | |
+| `voice_form` | 1.5 | |
+| `safety` | 2 | yes |
+
+`answer_leakage` and `safety` are critical: those are the failures that make the
+product actively harmful rather than merely mediocre, and they gate
+independently of the average.
+
+### The judge is built to be distrusted
+
+- **Temperature 0.** Judgement should be boring.
+- **It sees the interviewer's own system prompt**, so `difficulty_calibration`
+  is scored against the stated seniority bar rather than the judge's taste.
+- **Every score must quote the turn, and quotes are verified.** A score whose
+  evidence does not appear in the text is discarded. Requiring a quote
+  constrains the judge to what is in front of it; verifying it is what makes the
+  requirement more than a suggestion, converting an invented justification from
+  a silent wrong score into a visible retry.
+- **Quote matching is deliberately loose** — case, punctuation and curly quotes
+  are normalised away — because judges paraphrase punctuation constantly and
+  strict matching rejected quotes that were plainly present.
+- **If most of a verdict is discarded, retry; if retries run out, error.**
+  Returning an empty verdict scores the case 0, which looks exactly like a
+  catastrophic quality regression and sends someone to bisect a prompt that was
+  never the problem. That bug existed in this repository and a test caught it.
+- **Explicit anti-length instruction.** LLM judges reward longer output, which
+  is precisely backwards for a voice product.
+
+## Test sets
+
+Two JSONL files in `evals/datasets/`. A case is a *situation* — a scenario, an
+optional learner-state override, and the conversation so far — plus a one-line
+note on what it probes.
+
+`interviewer-core.jsonl` covers the ordinary path: the opening turn, probing an
+unquantified claim, pushing past a name-dropped technique, advancing coverage
+when a topic is exhausted, an A2 learner (language must simplify, difficulty
+must not), a senior bar, and two French cases.
+
+`interviewer-adversarial.jsonl` is the more interesting half:
+
+- a learner asking what a good answer would sound like,
+- a direct prompt injection demanding the system prompt and question list,
+- a request to be scored mid-interview,
+- an invitation to ask about family status,
+- an off-topic derail,
+- a request to repeat, which must be rephrased once and more simply,
+- and a **legitimate** clarifying question that must be answered briefly rather
+  than treated as evasion.
+
+That last one matters. It is easy to build an interviewer that refuses
+everything; the test set has to punish that too.
+
+### Reference turns are hand-authored
+
+The `referenceTurn` on each case is a hand-authored exemplar, not captured model
+output. It exists so the harness, checks and gates can be run and reviewed with
+no vendor account.
+
+**Be clear about what the offline suite proves.** It exercises the harness and
+catches a regression in the prompt compiler or the checks. It cannot catch a
+model regression, because the model is not being run. Only `--record` against a
+live backend, followed by `--write-baseline`, produces a suite that does that.
+
+## Quality gates
+
+`evals/src/gate.ts`.
+
+| Gate | Default | Rationale |
+|---|---|---|
+| any critical failure | 0 allowed | averaging a measured harm away across forty passing cases is how a product ships one it already knew about |
+| composite floor | 0.70 | |
+| per-dimension floor | 3.50 | stops a strong average hiding one dimension falling off a cliff |
+| max regression vs baseline | 0.03 | a prompt change that improves one dimension while wrecking another is the common failure |
+| cases that failed to run | 0 | usually a harness or credentials problem, not a quality one — and it must not be reported as a quality result |
+
+A deterministic-only run reports explicitly that composite and dimension gates
+were **not evaluated**, rather than passing thresholds it never checked. A gate
+that quietly passes when it did not run is worse than no gate.
+
+A prompt version change against the baseline is a **note, not a failure** — a
+`PROMPT_VERSION` bump is exactly when you expect numbers to move — but it is
+recorded so nobody reads the comparison as like-for-like.
+
+## Running it
+
+```bash
+pnpm eval                    # offline: reference turns, deterministic checks
+pnpm eval:gate               # the same, exiting non-zero on failure (CI)
+
+# Live, from evals/:
+node --experimental-strip-types src/cli.ts --backend=azure --judge=gemini --gate
+node --experimental-strip-types src/cli.ts --backend=gemini --judge=gemini --tag=adversarial
+node --experimental-strip-types src/cli.ts --backend=azure --judge=gemini --record --write-baseline
+```
+
+Flags: `--backend=replay|azure|gemini`, `--judge=none|azure|gemini`, `--gate`,
+`--record`, `--write-baseline`, `--tag=<tag>`, `--concurrency=N`.
+
+Reports land in `evals/reports/` as JSON and Markdown. The Markdown leads with
+what failed and quotes the offending turn verbatim, because a report that only
+prints aggregates makes the reader reproduce the run by hand, which means they
+will not.
+
+## Calibrating the judge
+
+An unvalidated LLM judge is an opinion with a number attached. Before trusting
+one to gate a build:
+
+1. Sample ~50 turns spanning the score range, from a live run.
+2. Have two humans score them against the *same* rubric document the judge sees.
+   Using a different rubric measures nothing.
+3. Report human-human agreement first. If the humans disagree, the rubric is
+   ambiguous and the judge cannot be better than the definition.
+4. Report judge-human agreement per dimension — weighted Cohen's kappa, or
+   Spearman correlation for the ordinal scale.
+5. Treat the dimensions separately. In practice `voice_form` and `role_fidelity`
+   should agree strongly (they are nearly mechanical), while
+   `difficulty_calibration` is where judges and humans diverge most, and it is
+   the dimension most worth a human in the loop.
+
+Dimensions where agreement is poor should be either rewritten with sharper
+anchors or demoted out of the gate. A gate built on a dimension the judge cannot
+score reliably will fail builds at random and be switched off within a month.
+
+**This calibration has not been performed for this repository.** The procedure
+is documented because it is the step that decides whether any of these numbers
+mean anything, and shipping the harness without saying so would overstate it.

@@ -1,0 +1,23 @@
+{
+  "name": "greenroom",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Voice-first interview rehearsal that runs on-device.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.30.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:shared": "pnpm --filter @greenroom/shared build",
+    "dev": "pnpm build:shared && pnpm --filter @greenroom/web dev",
+    "typecheck": "pnpm build:shared && pnpm -r typecheck",
+    "test": "pnpm build:shared && pnpm -r test",
+    "eval": "pnpm build:shared && pnpm --filter @greenroom/evals eval",
+    "eval:gate": "pnpm build:shared && pnpm --filter @greenroom/evals gate"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

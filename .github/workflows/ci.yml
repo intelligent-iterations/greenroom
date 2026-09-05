@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Every other package consumes the shared package's build output, so this
+      # has to happen before typecheck rather than as part of it.
+      - name: Build shared package
+        run: pnpm build:shared
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Unit tests
+        run: pnpm -r test
+
+      - name: Build web app
+        run: pnpm --filter @greenroom/web build
+
+      # Runs against stored reference turns with deterministic checks only, so
+      # it needs no vendor credentials and gates every pull request. It cannot
+      # catch a model regression — that needs the live job below — but it does
+      # catch a prompt or check regression, which is what a PR usually breaks.
+      - name: Evaluation quality gate
+        run: pnpm eval:gate
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: evals/reports/
+          retention-days: 14
