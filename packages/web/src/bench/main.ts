@@ -42,6 +42,8 @@ interface TurnMeasurement {
 
 interface BenchResult {
   status: 'running' | 'done' | 'error';
+  /** True if the tab was ever backgrounded during the run. */
+  throttled?: boolean;
   device: Awaited<ReturnType<typeof detectCapabilities>> | null;
   modelId: string;
   loadMs?: number;
@@ -109,8 +111,26 @@ function median(values: number[]): number {
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 }
 
+/**
+ * Chrome throttles hidden tabs hard — measured 6.4 MB/s hidden against 83 MB/s
+ * for curl on the same machine, and GPU work is deprioritised too. A run in a
+ * background tab produces numbers that look plausible and are wrong by an order
+ * of magnitude, so the result is flagged rather than quietly reported.
+ */
+function watchVisibility(): void {
+  const check = () => {
+    if (document.visibilityState === 'hidden') {
+      result.throttled = true;
+      log('WARNING: tab backgrounded — results are throttled and not valid');
+    }
+  };
+  check();
+  document.addEventListener('visibilitychange', check);
+}
+
 async function main(): Promise<void> {
   try {
+    watchVisibility();
     const caps = await detectCapabilities();
     result.device = caps;
     render();
@@ -231,6 +251,9 @@ async function main(): Promise<void> {
       decodeTokPerSecP50: Math.round(median(result.turns.map((t) => t.decodeTokPerSec))),
     };
     result.status = 'done';
+    if (result.throttled) {
+      log('RESULTS INVALID: the tab was backgrounded at some point during this run.');
+    }
     log(`DONE ${JSON.stringify(result.summary)}`);
     render();
   } catch (err) {

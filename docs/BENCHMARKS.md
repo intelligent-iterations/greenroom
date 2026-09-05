@@ -14,12 +14,24 @@ replaced, by pre-recorded 16kHz utterances in `packages/web/public/bench/`, so a
 run is reproducible and can be driven headlessly. Results land on the page and
 on `window.__BENCH__` for an automation driver to read.
 
-Two things to know before trusting a number from it:
+Three things to know before trusting a number from it, all learned by getting
+them wrong:
 
+- **The tab must be visible and focused.** A backgrounded tab is throttled hard:
+  measured in-page throughput was 6.4 MB/s hidden against 83 MB/s for `curl` on
+  the same machine and network, a ~13x penalty, and GPU work is deprioritised
+  too. `document.visibilityState` is the check — if it reads `hidden`, the
+  numbers are meaningless. This is the single easiest way to produce a
+  confidently wrong benchmark.
 - **Use the preview build, not the dev server.** Vite's HMR and dep optimiser
   reload the page mid-download, which restarts the run.
 - **Changing port invalidates everything.** The Cache API is keyed by origin, so
   moving from :5178 to :5179 re-downloads every model.
+
+The harness's own logging is bounded for the same reason. The first version
+appended a DOM node per progress callback and reached 42,000 nodes; the layout
+work competed with the inference being measured. Instrumentation that perturbs
+the measurement is worse than none.
 
 ## Verify models load before benchmarking them
 
