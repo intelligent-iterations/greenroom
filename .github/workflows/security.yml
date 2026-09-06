@@ -1,0 +1,142 @@
+name: Security
+
+# Runs on every change and weekly. Unlike the deploy workflow this is cheap and
+# has no side effects, so there is no reason to gate it behind a manual trigger —
+# the point of static analysis is that nobody has to remember to ask for it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Dependency advisories appear after code stops changing, so a scan that only
+    # runs on commits goes stale on a quiet repository.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-and-quality is broader than the default security-extended
+          # and catches the correctness smells worth knowing about too.
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        with:
+          category: /language:${{ matrix.language }}
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Runs regardless of repository visibility, unlike CodeQL's richer
+      # features, so this is the scanner that actually covers us while the
+      # repository is still private.
+      - name: Scan
+        run: |
+          semgrep scan \
+            --config p/default \
+            --config p/typescript \
+            --config p/react \
+            --config p/secrets \
+            --config p/owasp-top-ten \
+            --error \
+            --sarif --output semgrep.sarif \
+            --metrics=off || SCAN_FAILED=1
+          echo "SCAN_FAILED=${SCAN_FAILED:-0}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+
+      - name: Fail on findings
+        if: env.SCAN_FAILED == '1'
+        run: |
+          echo "::error::Semgrep reported findings. See the semgrep-sarif artifact."
+          exit 1
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history: a credential removed in a later commit is still in the
+          # history, and history is what becomes public on release.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    name: Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Audit
+        # Advisories in build-time tooling are worth knowing about but do not
+        # reach a user, so they are reported without failing the build. What
+        # would fail it is a vulnerability reachable from the shipped bundle,
+        # which the reachability check below is for.
+        continue-on-error: true
+        run: pnpm audit --audit-level moderate
+
+      - name: Reachability of advisories in the shipped bundle
+        run: |
+          pnpm build:shared
+          pnpm --filter @greenroom/web build
+
+          # Severity without reachability is noise. sharp and adm-zip are
+          # flagged through transformers.js but live on its Node paths; the
+          # bundler stubs them out. If that ever stops being true, the finding
+          # becomes real and this fails.
+          fail=0
+          for pkg in adm-zip stream-json; do
+            if grep -rl "$pkg" packages/web/dist/assets/*.js >/dev/null 2>&1; then
+              echo "::error::$pkg reached the browser bundle"; fail=1
+            fi
+          done
+
+          if grep -rl "sharp" packages/web/dist/assets/*.js >/dev/null 2>&1; then
+            if ! grep -rl "sharp (ignored)" packages/web/dist/assets/*.js >/dev/null 2>&1; then
+              echo "::error::sharp is bundled rather than stubbed"; fail=1
+            else
+              echo "sharp present only as a stubbed module — not shipped."
+            fi
+          fi
+
+          [ "$fail" -eq 0 ] && echo "No flagged dependency reaches the shipped bundle."
+          exit $fail

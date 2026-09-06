@@ -15,7 +15,8 @@ export class Emitter<Events extends Record<string, (...args: never[]) => void>> 
       try {
         (listener as (...a: unknown[]) => void)(...args);
       } catch (err) {
-        console.error(`listener for "${String(event)}" threw`, err);
+        // Separate arguments, not interpolation — see diagnostics.ts.
+        console.error('listener threw for event', String(event), err);
       }
     }
   }

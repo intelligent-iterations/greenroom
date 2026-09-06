@@ -68,7 +68,9 @@ export function logEvent(event: string, data?: Record<string, unknown>): void {
   };
   buffer.push(entry);
   if (buffer.length > CAPACITY) buffer.shift();
-  if (echo) console.log(`[greenroom +${entry.t}ms] ${event}`, data ?? '');
+  // Passed as separate arguments rather than interpolated: a format specifier
+  // inside an event name would otherwise be interpreted by the console.
+  if (echo) console.log('[greenroom]', `+${entry.t}ms`, event, data ?? '');
   persist();
 }
 

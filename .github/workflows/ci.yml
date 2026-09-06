@@ -13,16 +13,23 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Java for the Firestore emulator
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
 
       # Every other package consumes the shared package's build output, so this
       # has to happen before typecheck rather than as part of it.
@@ -34,6 +41,13 @@ jobs:
 
       - name: Unit tests
         run: pnpm -r test
+
+      # Called out separately because a failure here is a security boundary
+      # regression, not a normal test failure: these rules are the only thing
+      # stopping a client rewriting the mastery scores that decide what it is
+      # asked next. Blocking, deliberately.
+      - name: Firestore security rules
+        run: pnpm --filter @greenroom/rules test
 
       - name: Build web app
         run: pnpm --filter @greenroom/web build
@@ -47,7 +61,7 @@ jobs:
 
       - name: Upload evaluation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: eval-report
           path: evals/reports/

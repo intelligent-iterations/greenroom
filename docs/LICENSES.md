@@ -2,9 +2,13 @@
 
 ## Short answer
 
-**Yes, this can be open-sourced today.** The code is MIT, and every dependency
-and model is permissively licensed — with **one exception worth a decision**:
-Llama 3.2 is not OSI open source.
+**Yes.** The code is MIT and every dependency and model it offers is
+Apache-2.0, MIT or ISC. There is no exception and nothing to caveat.
+
+**No model weights are redistributed.** The browser fetches them at runtime from
+public repositories, and the built-in list is a starting point rather than a
+closed set — a user can name any Hugging Face repository or point at a folder
+they already have. The project ships code, not models.
 
 ## This repository
 
@@ -37,30 +41,30 @@ constrains what a commercial product may do.
 | Kokoro-82M | Apache-2.0 | voice |
 | SmolLM2 360M / 1.7B | Apache-2.0 | interviewer, default |
 | Qwen3 4B | Apache-2.0 | interviewer, largest tier |
-| **Llama 3.2 3B** | **Llama 3.2 Community License** | **not OSI open source** |
 
-### The Llama 3.2 exception
+Llama 3.2 was previously offered as a tier and has been **removed**. Its licence
+is source-available rather than open source, and shipping it as a default would
+have made "open source" inaccurate for the project as a whole. The honest move
+was to drop it rather than caveat it. Anyone who wants it can still enter the
+repository by hand — that is their licence decision, not one this project makes
+on their behalf.
 
-Meta's licence is source-available, not open source. Practically it carries
-three obligations a permissive licence does not:
+### Why Llama 3.2 is not here
 
-1. **Attribution.** Products built with it must display "Built with Llama".
-2. **Acceptable Use Policy**, which the licence incorporates by reference.
-3. **A scale trigger.** Above 700 million monthly active users, a separate
-   licence must be requested from Meta.
+Meta's licence is source-available, not open source. It carries three
+obligations a permissive licence does not: a "Built with Llama" attribution
+requirement, an acceptable-use policy incorporated by reference, and a separate
+licence above 700 million monthly active users.
 
-None of these are onerous for this project, and none of them are MIT.
+None are onerous. All are incompatible with describing the project, without
+qualification, as open source — and a qualified claim is the kind of thing that
+erodes trust in every other claim beside it. So the tier was removed rather than
+footnoted.
 
-**The choice this leaves you.** Every other tier — SmolLM2 and Qwen3 — is
-Apache-2.0, so dropping the Llama tier makes the whole stack cleanly open
-source. It is kept because it is the strongest *non-reasoning* model in reach,
-and non-reasoning matters for a voice interviewer: nothing to suppress, and no
-route by which the model's private deliberation reaches the speaker.
-
-If a fully OSI-open stack matters more than that, delete the Llama entry from
-`packages/web/src/voice/models.ts` and the picker loses one option. Nothing else
-changes. If it stays, the "Built with Llama" attribution belongs in the UI
-before this ships to real users.
+The cost is real and worth stating: it was the strongest *non-reasoning* model
+in reach, and non-reasoning matters for a voice partner — nothing to suppress
+and no route by which private deliberation reaches the speaker. Qwen3 4B covers
+the quality tier at the price of being a reasoning model.
 
 ## Voices and generated audio
 

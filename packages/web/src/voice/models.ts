@@ -38,24 +38,6 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     downloadMb: 1057,
   },
   {
-    // Strongest instruction-following at a size most machines can still hold,
-    // and non-reasoning — no think-block latency, no risk of deliberation
-    // reaching the synthesiser.
-    id: 'onnx-community/Llama-3.2-3B-Instruct-ONNX',
-    vendor: 'on-device',
-    label: 'Stronger — Llama 3.2 3B',
-    suitedTo:
-      'Better at staying in role. Needs memory to spare. Meta licence, not open source — see docs/LICENSES.md.',
-    residency: 'device',
-    firstTokenMsP50: 1500,
-    qualityScore: 0.72,
-    costPerSessionUsd: 0,
-    offlineCapable: true,
-    requiresWebGpu: true,
-    vramMb: 2296,
-    downloadMb: 2296,
-  },
-  {
     // Best on-device quality available here. Reasoning-capable, so it leans on
     // the thinking suppression and the <think> stripper in the pipeline.
     id: 'onnx-community/Qwen3-4B-ONNX',

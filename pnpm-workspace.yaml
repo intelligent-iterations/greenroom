@@ -1,3 +1,22 @@
 packages:
   - packages/*
   - evals
+
+# Supply-chain settings.
+#
+# The dependency tree here includes WASM runtimes and native bindings, and the
+# deploy pipeline holds credentials. A malicious version of anything in that
+# tree is the most plausible way this project gets compromised, so the defaults
+# are tightened rather than left implicit.
+
+# Wait a week before installing a newly published version. Most malicious
+# package releases are found and pulled within days; this trades being current
+# for not being first.
+minimumReleaseAge: 10080
+
+# Refuse transitive dependencies from sources other than the registry — git
+# URLs, tarballs and the like, which bypass registry-side scanning.
+blockExoticSubdeps: true
+
+# Stop a package update from quietly relaxing security settings.
+trustPolicy: no-downgrade

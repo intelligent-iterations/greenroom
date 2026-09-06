@@ -5,15 +5,41 @@ This is the list, not a promise that it has been worked through.
 
 ## Security review
 
-Not yet performed. SAST is planned; this is what a reviewer should look at
-first, written down now so it is not reconstructed later.
+- [x] **Static analysis.** `.github/workflows/security.yml` runs CodeQL
+      (`security-and-quality`), Semgrep (default, typescript, react, secrets,
+      OWASP top ten), gitleaks over full history, and a dependency audit — on
+      every push and PR, plus weekly, because advisories appear after code stops
+      changing. Semgrep currently reports **0 findings**; the first run reported
+      37 and what they were is recorded below.
+- [x] **Dependency audit.** 7 advisories, none reachable from the shipped
+      bundle: five are in `firebase-tools` (a devDependency used only at deploy
+      time) and two — `sharp`, `adm-zip` — are on transformers.js's Node paths,
+      with `sharp` appearing in the built worker as `sharp (ignored)`. The
+      security workflow asserts that stays true rather than trusting today's
+      analysis.
+- [x] **Firestore rules.** 21 tests against the real emulator, blocking in CI.
+      They cover the boundary that matters: a client cannot write `mastery`,
+      `recentErrors` or `sessionsCompleted`, cannot smuggle one alongside a
+      legitimate preference change, cannot read another learner's data, and
+      cannot edit or delete a session transcript after the fact.
 
-- [ ] **Static analysis** (SAST) across `packages/` and `evals/`.
-- [ ] **Dependency audit** — `pnpm audit`, and a look at the transitive tree
-      around `onnxruntime-web` and `@ricky0123/vad-web`, which ship WASM.
-- [ ] **Firestore rules**, specifically that `mastery`, `recentErrors` and
-      `sessionsCompleted` remain server-only. There are no tests for the rules
-      themselves; the emulator supports them and they should exist.
+### What the first SAST run found
+
+Worth recording, because "we ran a scanner" means little without it:
+
+- **4 shell-injection findings.** Workflow inputs were interpolated directly
+  into `run:` blocks. `confirm` is free text, so a crafted value could break out
+  of the quoting and execute in a runner holding deploy credentials. All inputs
+  now arrive through `env:`, where they are data rather than script.
+- **27 mutable action tags.** Actions were pinned to `@v4`, which a compromised
+  tag can repoint. Every action is now pinned to a commit SHA with the tag kept
+  in a trailing comment.
+- **3 pnpm supply-chain settings** absent — `minimumReleaseAge`,
+  `blockExoticSubdeps`, `trustPolicy`. Now set; the tree includes WASM runtimes
+  and native bindings, and a malicious version in it is the likeliest route to
+  compromise.
+- **1 prototype-pollution** risk copying parsed JSON with `Object.assign`.
+- **2 format-string** issues in console logging.
 - [ ] **The `generate` endpoint** — see "Do we meter tokens?" below, which
       reframes this. It is public-invoker by necessity (a browser has no Google
       credentials) and gated by a Firebase ID token. If the cloud route ships,
@@ -67,10 +93,10 @@ need to be switched on for a public demo of on-device inference.
 ## Content and licensing
 
 - [x] Licences audited — see [LICENSES.md](LICENSES.md).
-- [ ] **Decide on Llama 3.2.** It is source-available, not open source. Either
-      drop the tier (every other model is Apache-2.0, so the stack becomes
-      cleanly open) or add the required "Built with Llama" attribution to the
-      UI. Currently flagged in the picker and documented, not resolved.
+- [x] **Llama 3.2 removed.** Source-available, not open source, so it is gone
+      rather than footnoted. Every remaining model is Apache-2.0 or MIT, and no
+      weights are redistributed — the browser fetches them at runtime and the
+      user can name any repository or use a local folder.
 - [x] MIT licence file present.
 
 ## Honesty of the record

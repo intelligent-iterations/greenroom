@@ -104,7 +104,18 @@ async function main() {
 
   if (params.get('view')) {
     const saved = localStorage.getItem(STORAGE_KEY);
-    Object.assign(state, saved ? JSON.parse(saved) : { stage: 'no saved run' });
+    // Copied key by key rather than Object.assign'd from parsed JSON. A stored
+    // value containing __proto__ would otherwise reach the prototype chain —
+    // the file is written by this page, but it is attacker-controllable by
+    // anyone who can run script on this origin, and the safe version costs
+    // nothing.
+    const parsed: unknown = saved ? JSON.parse(saved) : { stage: 'no saved run' };
+    if (parsed && typeof parsed === 'object') {
+      for (const [key, value] of Object.entries(parsed)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        state[key] = value;
+      }
+    }
     show();
     return;
   }
