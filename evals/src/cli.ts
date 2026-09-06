@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeBackend, type EvalBackend } from './backends.ts';
-import { LocalBackend } from './backend-local.ts';
 import { DEFAULT_GATES, evaluateGates, toBaseline, type Baseline } from './gate.ts';
 import { renderMarkdown, renderProgressLine } from './report.ts';
 import { loadCases, runSuite } from './runner.ts';
@@ -91,17 +90,22 @@ async function main(): Promise<void> {
   // Behaviour is what the checks measure and behaviour does not depend on the
   // accelerator, so this is the right place for it; bench.html keeps the job
   // that actually needs a GPU, which is latency.
-  const backend =
-    args.backend === 'local'
-      ? new LocalBackend({
-          model: args.model ?? 'HuggingFaceTB/SmolLM2-1.7B-Instruct',
-          ...(args.dtype ? { dtype: args.dtype as 'q4' } : {}),
-        })
-      : makeBackend(args.backend, recorded);
+  //
+  // Imported lazily and only for this backend. Statically, it drags the ONNX
+  // runtime and its native bindings into every invocation — including the
+  // replay run that gates CI, which needs none of it and was paying seconds
+  // per run for the privilege.
+  let backend: EvalBackend;
 
-  if (backend instanceof LocalBackend) {
+  if (args.backend === 'local') {
+    const { LocalBackend } = await import('./backend-local.ts');
+    const local = new LocalBackend({
+      model: args.model ?? 'HuggingFaceTB/SmolLM2-1.7B-Instruct',
+      ...(args.dtype ? { dtype: args.dtype as 'q4' } : {}),
+    });
+
     let last = '';
-    await backend.load((message) => {
+    await local.load((message) => {
       // Rewrite one line rather than scrolling the terminal.
       if (message !== last) {
         last = message;
@@ -109,6 +113,9 @@ async function main(): Promise<void> {
       }
     });
     process.stdout.write('\r'.padEnd(32) + '\r');
+    backend = local;
+  } else {
+    backend = makeBackend(args.backend, recorded);
   }
   const judge: EvalBackend | undefined =
     args.judge === 'none' ? undefined : makeBackend(args.judge, recorded);
