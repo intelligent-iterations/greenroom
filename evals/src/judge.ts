@@ -1,4 +1,4 @@
-import { JudgeVerdict, RUBRIC, buildJudgePrompt, type Score } from './deps.ts';
+import { JudgeVerdict, applicableRubric, buildJudgePrompt, type Score } from './deps.ts';
 import type { EvalBackend } from './backends.ts';
 
 /**
@@ -28,9 +28,19 @@ const MAX_ATTEMPTS = 3;
 
 export async function judgeTurn(
   backend: EvalBackend,
-  input: { interviewerSystemPrompt: string; transcript: string; turnUnderTest: string },
+  input: {
+    interviewerSystemPrompt: string;
+    transcript: string;
+    turnUnderTest: string;
+    passages?: string[];
+  },
 ): Promise<JudgeResult> {
   const prompt = buildJudgePrompt(input);
+  // Which dimensions were actually put to the judge. A verdict scoring one that
+  // was not asked for is not a bonus: it means the judge is working from its
+  // own idea of the rubric, and the score would enter a dimension mean that
+  // most cases never populate.
+  const asked = new Set(applicableRubric(input.passages).map((d) => d.id));
   let lastError = '';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -53,6 +63,10 @@ export async function judgeTurn(
     let discarded = 0;
 
     for (const score of parsed.data.scores) {
+      if (!asked.has(score.dimension)) {
+        discarded += 1;
+        continue;
+      }
       if (normalised.includes(normaliseHaystack(score.evidence))) kept.push(score);
       else discarded += 1;
     }
@@ -62,7 +76,7 @@ export async function judgeTurn(
     // retries run out, fail loudly. Returning an empty verdict here would score
     // the case 0 and read as a catastrophic quality regression, sending someone
     // to bisect a prompt that was never the problem.
-    if (kept.length < RUBRIC.length / 2) {
+    if (kept.length < asked.size / 2) {
       lastError = `attempt ${attempt}: ${discarded} of ${parsed.data.scores.length} scores had unverifiable evidence`;
       continue;
     }

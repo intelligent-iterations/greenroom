@@ -12,6 +12,7 @@ export {
   JudgeVerdict,
   PROMPT_VERSION,
   RUBRIC,
+  applicableRubric,
   SCENARIOS,
   SeniorityLevel,
   buildCorpus,

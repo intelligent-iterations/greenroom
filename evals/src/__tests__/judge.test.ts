@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EvalBackend } from '../backends.ts';
-import { RUBRIC } from '../deps.ts';
+import { RUBRIC, applicableRubric } from '../deps.ts';
 import { extractJson, judgeTurn } from '../judge.ts';
 
 const TURN = 'A lot faster is doing some work there. What was the latency before you touched it?';
@@ -21,9 +21,15 @@ function backendOf(...responses: string[]): EvalBackend & { calls: number } {
   };
 }
 
+/**
+ * A verdict covering the dimensions the judge was actually asked for.
+ *
+ * `input` below carries no passages, so grounding is not on the rubric the
+ * judge sees — and a score for it would be discarded as unasked.
+ */
 function verdict(evidence: string, scores = 4): string {
   return JSON.stringify({
-    scores: RUBRIC.map((d) => ({ dimension: d.id, score: scores, evidence })),
+    scores: applicableRubric().map((d) => ({ dimension: d.id, score: scores, evidence })),
     headline: '',
   });
 }
@@ -45,7 +51,7 @@ describe('extractJson', () => {
 describe('judgeTurn evidence verification', () => {
   it('keeps scores whose evidence appears in the turn', async () => {
     const result = await judgeTurn(backendOf(verdict('What was the latency before you touched it')), input);
-    expect(result.scores).toHaveLength(RUBRIC.length);
+    expect(result.scores).toHaveLength(applicableRubric().length);
     expect(result.discarded).toBe(0);
   });
 
@@ -80,6 +86,36 @@ describe('judgeTurn evidence verification', () => {
     const backend = backendOf('sorry!', verdict('What was the latency before you touched it'));
     const result = await judgeTurn(backend, input);
     expect(backend.calls).toBe(2);
-    expect(result.scores).toHaveLength(RUBRIC.length);
+    expect(result.scores).toHaveLength(applicableRubric().length);
+  });
+});
+
+describe('judgeTurn dimension scope', () => {
+  const quote = 'What was the latency before you touched it';
+
+  // A judge scoring a dimension it was not shown is not being generous: it is
+  // working from its own idea of the rubric, and that score would enter a
+  // dimension mean that most cases never populate.
+  it('discards a score for a dimension it was not asked about', async () => {
+    const withGrounding = JSON.stringify({
+      scores: RUBRIC.map((d) => ({ dimension: d.id, score: 4, evidence: quote })),
+      headline: '',
+    });
+    const result = await judgeTurn(backendOf(withGrounding), input);
+    expect(result.scores.map((s) => s.dimension)).not.toContain('grounding');
+    expect(result.discarded).toBe(1);
+  });
+
+  it('keeps a grounding score when the interviewer was actually given context', async () => {
+    const withGrounding = JSON.stringify({
+      scores: RUBRIC.map((d) => ({ dimension: d.id, score: 4, evidence: quote })),
+      headline: '',
+    });
+    const result = await judgeTurn(backendOf(withGrounding), {
+      ...input,
+      passages: ['The team runs Postgres.'],
+    });
+    expect(result.scores.map((s) => s.dimension)).toContain('grounding');
+    expect(result.discarded).toBe(0);
   });
 });
