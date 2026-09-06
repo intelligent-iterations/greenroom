@@ -37,3 +37,6 @@ packages/functions/dist/
 
 # copied at build time by packages/web/scripts/copy-vad-assets.mjs
 packages/web/public/vad/
+
+# locally cached model weights
+.model-cache/

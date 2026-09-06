@@ -14,18 +14,45 @@ first, written down now so it is not reconstructed later.
 - [ ] **Firestore rules**, specifically that `mastery`, `recentErrors` and
       `sessionsCompleted` remain server-only. There are no tests for the rules
       themselves; the emulator supports them and they should exist.
-- [ ] **The `generate` endpoint.** It is public-invoker by necessity (a browser
-      has no Google credentials) and gated by a Firebase ID token. Worth
-      confirming: token verification cannot be bypassed, the request caps in
-      `GenerateBody` are enforced, and an authenticated user cannot run up an
-      unbounded vendor bill. There is currently **no per-user rate limit** —
-      that is the gap most worth closing before this is public.
+- [ ] **The `generate` endpoint** — see "Do we meter tokens?" below, which
+      reframes this. It is public-invoker by necessity (a browser has no Google
+      credentials) and gated by a Firebase ID token. If the cloud route ships,
+      confirm token verification cannot be bypassed, that the caps in
+      `GenerateBody` hold, and add a per-user rate limit. If it does not ship,
+      none of that applies.
 - [ ] **Local file handling.** `local-models.ts` reads a folder the user picks
       and serves it to the model loader. Confirm nothing outside the selection
       is reachable and that a malicious filename cannot escape the match.
 - [ ] **CSV import.** `parseEvalCsv` takes an arbitrary file. It never
       evaluates content, but the results view renders model output, so confirm
       there is no path to injection through a case's text.
+
+## Do we meter tokens?
+
+**On-device: no, and that is the point.** The tokens are generated on the
+user's own GPU with the user's own electricity. There is no per-token cost, no
+quota to enforce, no usage to account for, and nothing to rate limit. A user who
+talks to it for eight hours costs the project exactly nothing. Metering local
+inference would be inventing a problem — and worse, it would require reporting
+usage back, which contradicts the reason the thing runs locally at all.
+
+**The cloud route: yes**, because those tokens land on *our* vendor bill. That
+is the only place the concern exists, and it is worth being precise that it is
+about the endpoint, not about the product.
+
+Which suggests the simplest resolution for a public release: **do not configure
+vendor keys on the public deployment.** With no keys the endpoint returns 503
+before reaching a vendor, so there is no bill to run up and no rate limit to
+write. That is already the state today, so the exposure is theoretical rather
+than live.
+
+The cloud adapter still earns its place in the repository — it is the working
+proof that the `LanguageModel` interface is genuinely portable, and it means an
+operator who wants a stronger model can supply their own keys. It just does not
+need to be switched on for a public demo of on-device inference.
+
+- [ ] Decide: ship the cloud route publicly (then rate-limit it), or leave the
+      keys unset (then it is inert). Do not ship it configured and unlimited.
 
 ## Secrets and configuration
 
@@ -58,6 +85,4 @@ single-machine measurements and that the untested areas are still listed.
 - [x] Instruments (`bench`, `evals` runner, probes) excluded from the
       production build; verified absent from the deployed origin.
 - [x] Cross-origin isolation headers verified on the live site.
-- [ ] Decide whether the public demo keeps the cloud inference route. It needs
-      vendor keys, and a public origin with a working cloud route is a bill
-      waiting to happen without the rate limit above.
+- [ ] Cloud route on the public demo — decided under "Do we meter tokens?".

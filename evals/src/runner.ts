@@ -69,6 +69,14 @@ const BASE_LEARNER: LearnerState = {
 
 export interface RunOptions {
   backend: EvalBackend;
+  /**
+   * Which prompt the model under test runs.
+   *
+   * On-device models cannot follow the full prompt — measured, not assumed —
+   * so a harness that only ever compiles the full one is scoring a
+   * configuration those models never run.
+   */
+  promptStyle?: 'full' | 'compact';
   /** Undefined runs deterministic checks only — the zero-secrets CI path. */
   judge?: EvalBackend;
   /** Called after each case so a long run reports progress. */
@@ -93,7 +101,12 @@ export async function runCase(
     ...testCase.learner,
   };
 
-  const prompt = compileInterviewerPrompt({ scenario, learner });
+  const prompt = compileInterviewerPrompt({
+    scenario,
+    learner,
+    ...(options.promptStyle ? { style: options.promptStyle } : {}),
+    ...(scenario.requiredQuestions[0] ? { nextQuestion: scenario.requiredQuestions[0] } : {}),
+  });
   const messages: ChatMessage[] = [
     { role: 'system', content: prompt.system },
     ...testCase.transcript.map((t): ChatMessage => ({

@@ -139,6 +139,10 @@ export function makeBackend(name: string, recorded: Map<string, string>): EvalBa
   switch (name) {
     case 'replay':
       return new ReplayBackend(recorded);
+    case 'local':
+      // Constructed by the CLI, which knows the chosen model. Kept out of this
+      // switch so the module does not pull the ONNX runtime into every run.
+      throw new Error("Use --backend=local with --model=<repo>; the CLI builds it directly.");
     case 'azure':
       return new AzureBackend();
     case 'gemini':

@@ -109,6 +109,52 @@ catches a regression in the prompt compiler or the checks. It cannot catch a
 model regression, because the model is not being run. Only `--record` against a
 live backend, followed by `--write-baseline`, produces a suite that does that.
 
+## Running evals natively
+
+The primary way to score an on-device model is a CLI, not a browser:
+
+```bash
+pnpm --filter @greenroom/evals exec node --experimental-strip-types src/cli.ts \
+  --backend=local --model=HuggingFaceTB/SmolLM2-1.7B-Instruct
+```
+
+Weights cache in `.model-cache/` beside the repository — deliberately not inside
+`node_modules`, which an install wipes; re-downloading gigabytes because someone
+ran `pnpm install` is a bad trade.
+
+**Why this is the right place for it.** Behaviour does not depend on the
+accelerator. Whether a turn asks a question, stays in role, or leaks an answer
+is a property of the model and the prompt; WebGPU changes how fast tokens
+arrive, not what they say. So the checks run on CPU in a scriptable process,
+and `bench.html` keeps the one job that genuinely needs a GPU — latency.
+
+The browser runner earlier in this document still exists and is still useful for
+scoring exactly the GPU configuration a user will run. It is no longer the only
+option, which matters: a backgrounded Chrome tab is throttled to a crawl, the
+run dies with the page, and driving it through a debugger connection lost two
+completed runs.
+
+### What it measured immediately
+
+SmolLM2 360M — the weakest tier — across all fifteen cases:
+
+| Prompt | Passing |
+|---|---|
+| Full (~680 tokens) | 4 / 15 |
+| Compact (~146 tokens) | **12 / 15** |
+
+The full prompt makes a 360M model emit markdown and repeat itself until the
+token budget runs out. That was already known from a browser run; this
+reproduces it in a process that can go in CI.
+
+The three remaining failures are real, and the kind worth having:
+
+- **Answer leakage.** Asked what a good answer looks like, it explains what a
+  good answer looks like. That is the critical check earning its place.
+- **A deflection that does not redirect.** "I'm not sure what that has to do
+  with the job" declines correctly but leaves the conversation nowhere.
+- **Two questions in one spoken turn.**
+
 ## Scoring the model that actually ships
 
 The offline harness scores vendor models over HTTP. It cannot reach the

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeBackend, type EvalBackend } from './backends.ts';
+import { LocalBackend } from './backend-local.ts';
 import { DEFAULT_GATES, evaluateGates, toBaseline, type Baseline } from './gate.ts';
 import { renderMarkdown, renderProgressLine } from './report.ts';
 import { loadCases, runSuite } from './runner.ts';
@@ -14,8 +15,11 @@ const BASELINE = join(ROOT, 'baseline.json');
 
 interface Args {
   backend: string;
+  model?: string;
+  dtype?: string;
   judge: string;
   gate: boolean;
+  style?: 'full' | 'compact';
   record: boolean;
   writeBaseline: boolean;
   tag?: string;
@@ -28,10 +32,13 @@ function parseArgs(argv: string[]): Args {
 
   return {
     backend: get('backend') ?? 'replay',
+    ...(get('model') ? { model: get('model')! } : {}),
+    ...(get('dtype') ? { dtype: get('dtype')! } : {}),
     // Deterministic checks only unless a judge is named. That default is what
     // lets the suite gate every pull request without a single secret.
     judge: get('judge') ?? 'none',
     gate: argv.includes('--gate'),
+    ...(get('style') ? { style: get('style') as 'full' | 'compact' } : {}),
     record: argv.includes('--record'),
     writeBaseline: argv.includes('--write-baseline'),
     ...(get('tag') ? { tag: get('tag')! } : {}),
@@ -80,7 +87,29 @@ async function main(): Promise<void> {
   const recorded = new Map(
     cases.filter((c) => c.referenceTurn).map((c) => [c.id, c.referenceTurn!]),
   );
-  const backend = makeBackend(args.backend, recorded);
+  // `local` runs the on-device model natively rather than in a browser tab.
+  // Behaviour is what the checks measure and behaviour does not depend on the
+  // accelerator, so this is the right place for it; bench.html keeps the job
+  // that actually needs a GPU, which is latency.
+  const backend =
+    args.backend === 'local'
+      ? new LocalBackend({
+          model: args.model ?? 'HuggingFaceTB/SmolLM2-1.7B-Instruct',
+          ...(args.dtype ? { dtype: args.dtype as 'q4' } : {}),
+        })
+      : makeBackend(args.backend, recorded);
+
+  if (backend instanceof LocalBackend) {
+    let last = '';
+    await backend.load((message) => {
+      // Rewrite one line rather than scrolling the terminal.
+      if (message !== last) {
+        last = message;
+        process.stdout.write(`\r${message.padEnd(30)}`);
+      }
+    });
+    process.stdout.write('\r'.padEnd(32) + '\r');
+  }
   const judge: EvalBackend | undefined =
     args.judge === 'none' ? undefined : makeBackend(args.judge, recorded);
 
@@ -90,6 +119,9 @@ async function main(): Promise<void> {
 
   const report = await runSuite(cases, {
     backend,
+    // Local models get the compact prompt by default, since that is what the
+    // product compiles for them.
+    promptStyle: args.style ?? (args.backend === 'local' ? 'compact' : 'full'),
     ...(judge ? { judge } : {}),
     concurrency: args.concurrency,
     onProgress: (result, index, total) => {
