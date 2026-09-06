@@ -15,6 +15,7 @@ const learner: LearnerState = {
   recentErrors: [],
   sessionsCompleted: 3,
   updatedAt: NOW - DAY,
+  documents: [],
 };
 
 describe('extractJson', () => {

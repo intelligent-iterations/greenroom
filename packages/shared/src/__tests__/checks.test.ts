@@ -157,6 +157,26 @@ describe('not_repeating', () => {
   });
 });
 
+describe('not_reciting_context', () => {
+  const passage = 'Led a Kafka migration that cut checkout latency in half across the payments team.';
+
+  it('fails a turn that reads its context back at the candidate', () => {
+    const turn = `Led a Kafka migration that cut checkout latency in half across the payments team. Tell me about that.`;
+    expect(result(turn, 'not_reciting_context', { injectedPassages: [passage] })?.passed).toBe(false);
+  });
+
+  // Quoting a phrase back is how an interviewer shows it was listening. A
+  // check that failed this would fail correct behaviour.
+  it('stays quiet when a turn only quotes a short phrase back', () => {
+    const turn = 'You mentioned the Kafka migration. What did the latency settle at?';
+    expect(result(turn, 'not_reciting_context', { injectedPassages: [passage] })).toBeUndefined();
+  });
+
+  it('stays absent when no passages were injected', () => {
+    expect(result('What did the latency settle at?', 'not_reciting_context')).toBeUndefined();
+  });
+});
+
 describe('a clean interviewer turn still passes everything', () => {
   it('has no failures', () => {
     const turn = 'What did the latency settle at after the change?';

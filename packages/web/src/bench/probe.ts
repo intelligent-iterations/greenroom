@@ -20,7 +20,7 @@ async function main() {
   const learner: LearnerState = {
     userId: 'probe', cefr: 'B2', seniority: 'mid', language: 'en',
     targetRole: 'Backend Engineer', mastery: [], recentErrors: [],
-    sessionsCompleted: 0, updatedAt: 0,
+    sessionsCompleted: 0, updatedAt: 0, documents: [],
   };
   const prompt = compileInterviewerPrompt({ scenario, learner });
   result.systemPromptChars = prompt.system.length;

@@ -223,6 +223,53 @@ describe('session transcripts', () => {
   });
 });
 
+describe('learner documents never reach the server', () => {
+  const cv = [{ id: 'cv-1', kind: 'cv', title: 'CV', text: 'Led the Kafka migration.', updatedAt: 0 }];
+
+  // A pasted CV is the most identifying thing this product handles, and the
+  // design says it stays on the device. The client is written not to send it;
+  // these two tests are what make that a guarantee rather than a promise.
+  it('refuses a profile created with documents attached', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(setDoc(doc(db, 'learners', ALICE), learnerDoc(ALICE, { documents: cv })));
+  });
+
+  it('refuses an update that adds documents to an existing profile', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'learners', ALICE), learnerDoc(ALICE));
+    });
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(updateDoc(doc(db, 'learners', ALICE), { documents: cv }));
+  });
+
+  it('still allows a profile with no documents field at all', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(setDoc(doc(db, 'learners', ALICE), learnerDoc(ALICE)));
+  });
+
+  // Passage *references* are fine: they name a scenario note or a chunk index,
+  // never the document text.
+  it('accepts a session carrying passage references', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, 'learners', ALICE, 'sessions', 's1'),
+        sessionDoc(ALICE, {
+          groundedPassages: [{ sourceId: 'scenario:backend-mid-en', chunkIndex: 0 }],
+        }),
+      ),
+    );
+  });
+
+  it('caps how many passage references one session may carry', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    const tooMany = Array.from({ length: 41 }, (_, i) => ({ sourceId: 'doc:cv-1', chunkIndex: i }));
+    await assertFails(
+      setDoc(doc(db, 'learners', ALICE, 'sessions', 's1'), sessionDoc(ALICE, { groundedPassages: tooMany })),
+    );
+  });
+});
+
 describe('everything else is closed', () => {
   it('refuses reads and writes outside the learner tree', async () => {
     // The catch-all deny. Without it, a future collection is open by default.

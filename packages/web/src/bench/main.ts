@@ -146,6 +146,7 @@ async function main(): Promise<void> {
       recentErrors: [],
       sessionsCompleted: 0,
       updatedAt: 0,
+      documents: [],
     };
     const prompt = compileInterviewerPrompt({ scenario, learner });
 

@@ -28,6 +28,7 @@ export function defaultLearnerState(userId: string): LearnerState {
     recentErrors: [],
     sessionsCompleted: 0,
     updatedAt: Date.now(),
+    documents: [],
   };
 }
 
@@ -85,7 +86,14 @@ export async function saveLearnerState(state: LearnerState): Promise<void> {
   try {
     const user = await ensureUser();
     if (!user) return;
-    await setDoc(doc(backend.db, 'learners', user.uid), { ...state, userId: user.uid });
+    // `documents` is deliberately dropped here, not merely left unread. A
+    // pasted CV is the most identifying thing this product handles and it stays
+    // on the device that holds it; firestore.rules rejects a learner write
+    // carrying the field, so sending it would silently break sync as well as
+    // breaking the promise — the catch below would swallow the rejection and
+    // nobody would learn that state had stopped syncing.
+    const { documents: _localOnly, ...syncable } = state;
+    await setDoc(doc(backend.db, 'learners', user.uid), { ...syncable, userId: user.uid });
   } catch {
     // Sync is best-effort by design; local already holds the truth.
   }

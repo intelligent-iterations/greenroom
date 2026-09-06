@@ -65,6 +65,7 @@ const BASE_LEARNER: LearnerState = {
   recentErrors: [],
   sessionsCompleted: 5,
   updatedAt: 0,
+  documents: [],
 };
 
 export interface RunOptions {

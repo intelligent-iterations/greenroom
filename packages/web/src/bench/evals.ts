@@ -83,7 +83,7 @@ show();
 const BASE_LEARNER: LearnerState = {
   userId: 'eval', cefr: 'B2', seniority: 'mid', language: 'en',
   targetRole: 'Backend Engineer', mastery: [], recentErrors: [],
-  sessionsCompleted: 5, updatedAt: 0,
+  sessionsCompleted: 5, updatedAt: 0, documents: [],
 };
 
 async function loadCases(): Promise<Case[]> {

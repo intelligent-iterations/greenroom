@@ -158,6 +158,8 @@ export interface CheckContext {
   previousInterviewerTurns?: string[];
   /** What the candidate said immediately before this turn. */
   lastCandidateAnswer?: string;
+  /** Retrieved passages put in front of the model for this turn, verbatim. */
+  injectedPassages?: string[];
 }
 
 /** Content words, lowercased, for overlap comparisons. */
@@ -197,6 +199,51 @@ const REPEAT_THRESHOLD = 0.8;
  * re-asking a dodged question, which is the interviewer doing its job.
  */
 const ENGAGEMENT_FLOOR = 0.2;
+
+/**
+ * Longest run of words a turn may share with a passage it was handed.
+ *
+ * Grounding is mostly a judgement call and belongs in the rubric, but one
+ * failure is exactly decidable and it is the one a small model handed a passage
+ * actually exhibits: it reads the passage back at the candidate instead of
+ * asking about it.
+ *
+ * Eight is deliberately generous. An interviewer legitimately quotes a phrase
+ * back — "you mentioned the Rails monolith" — and a threshold that fired on
+ * that would fail correct behaviour, which is worse than no check because it
+ * teaches people to ignore the suite.
+ */
+const MAX_VERBATIM_RUN = 8;
+
+/** Words in common between two texts, as the longest unbroken run. */
+function longestSharedRun(a: string, b: string): number {
+  const left = normaliseWords(a);
+  const right = normaliseWords(b);
+  if (left.length === 0 || right.length === 0) return 0;
+
+  let best = 0;
+  let previous = new Array<number>(right.length + 1).fill(0);
+  for (let i = 1; i <= left.length; i += 1) {
+    const current = new Array<number>(right.length + 1).fill(0);
+    for (let j = 1; j <= right.length; j += 1) {
+      if (left[i - 1] === right[j - 1]) {
+        current[j] = (previous[j - 1] ?? 0) + 1;
+        if (current[j]! > best) best = current[j]!;
+      }
+    }
+    previous = current;
+  }
+  return best;
+}
+
+function normaliseWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+}
 
 export function runChecks(
   turn: string,
@@ -271,6 +318,19 @@ export function runChecks(
     }
     results.push(
       check('not_repeating', false, `repeats an earlier question (${repeat.toFixed(2)} overlap)`),
+    );
+    break;
+  }
+
+  for (const passage of context.injectedPassages ?? []) {
+    const run = longestSharedRun(text, passage);
+    if (run <= MAX_VERBATIM_RUN) continue;
+    results.push(
+      check(
+        'not_reciting_context',
+        false,
+        `reads ${run} words of its own context back at the candidate`,
+      ),
     );
     break;
   }

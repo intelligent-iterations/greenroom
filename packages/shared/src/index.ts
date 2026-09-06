@@ -5,5 +5,6 @@ export * from './pipeline.js';
 export * from './routing.js';
 export * from './checks.js';
 export * from './eval-csv.js';
+export * from './retrieval.js';
 export * from './rubric.js';
 export * from './scenarios.js';

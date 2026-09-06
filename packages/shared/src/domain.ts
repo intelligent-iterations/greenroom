@@ -79,6 +79,47 @@ export const ObservedError = z.object({
 export type ObservedError = z.infer<typeof ObservedError>;
 
 /**
+ * A document the learner supplied — a pasted CV, a job description, notes.
+ *
+ * Learner-owned rather than scenario-owned, and the distinction is load-bearing.
+ * The scenario catalogue is shared content that three surfaces must see
+ * byte-identically (see scenarios.ts and the re-export in functions/), so a
+ * per-person document hung off a scenario would be silently absent server-side.
+ * It also has to be the learner's to delete, which a bundled constant is not.
+ *
+ * Stored as raw text and chunked at retrieval time, never pre-chunked, so
+ * changing the chunker does not require migrating anyone's data.
+ */
+export const SourceDocument = z.object({
+  id: z.string().min(1),
+  kind: z.enum(['cv', 'job_description', 'notes']),
+  title: z.string().min(1).max(120),
+  text: z.string().max(20_000),
+  updatedAt: z.number().int(),
+});
+export type SourceDocument = z.infer<typeof SourceDocument>;
+
+/**
+ * A reference to a passage that was actually put in front of the model.
+ *
+ * Recorded on the session so a grounding claim in a transcript can be checked
+ * against what the interviewer was given, rather than reconstructed afterwards
+ * from a retriever that may since have changed.
+ */
+export const PassageRef = z.object({
+  sourceId: z.string().min(1),
+  chunkIndex: z.number().int().min(0),
+  /**
+   * Present only for passages from the shared scenario catalogue, which is
+   * public content. A learner document's text is never written to the server:
+   * the reference is enough to reproduce it on the device that holds the
+   * document, and a CV is the most identifying thing this product ever sees.
+   */
+  text: z.string().max(400).optional(),
+});
+export type PassageRef = z.infer<typeof PassageRef>;
+
+/**
  * Everything the prompt layer knows about the learner. This is the
  * "learner-state layer" the pipeline is calibrated against; it is the only
  * user-specific input to prompt compilation.
@@ -93,6 +134,16 @@ export const LearnerState = z.object({
   recentErrors: z.array(ObservedError).max(10),
   sessionsCompleted: z.number().int().min(0),
   updatedAt: z.number().int(),
+  /**
+   * Documents the learner pasted in, for grounding.
+   *
+   * Local-first and enforced as such: `saveLearnerState` omits this field from
+   * the Firestore mirror and firestore.rules rejects a write that carries it,
+   * so the privacy claim holds at the security boundary rather than by client
+   * politeness. Defaulted, so every profile stored before this existed still
+   * parses.
+   */
+  documents: z.array(SourceDocument).max(3).default([]),
 });
 export type LearnerState = z.infer<typeof LearnerState>;
 
@@ -159,6 +210,8 @@ export const SessionRecord = z.object({
       turnaroundMsP95: z.number().optional(),
     })
     .optional(),
+  /** Passages injected into the interviewer prompt, in the order they were used. */
+  groundedPassages: z.array(PassageRef).max(40).default([]),
 });
 export type SessionRecord = z.infer<typeof SessionRecord>;
 

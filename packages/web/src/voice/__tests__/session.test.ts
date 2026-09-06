@@ -27,6 +27,7 @@ const learner: LearnerState = {
   recentErrors: [],
   sessionsCompleted: 0,
   updatedAt: 0,
+  documents: [],
 };
 
 /** A controllable clock, because barge-in is guarded on elapsed playback time. */
