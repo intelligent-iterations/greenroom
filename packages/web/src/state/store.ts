@@ -10,7 +10,7 @@ import type { SessionState } from '../voice/session.js';
  * adapter between the two, so every component reads one source and the pipeline
  * never reaches into React.
  */
-export type Phase = 'setup' | 'live' | 'debrief';
+export type Phase = 'setup' | 'live' | 'debrief' | 'evals';
 
 export interface LatencySample extends TurnTimings {
   turnIndex: number;
@@ -31,12 +31,25 @@ interface AppStore {
   allowCloud: boolean;
   /** Chosen on-device model id, or undefined to let the router decide. */
   modelId?: string;
+  /** A Hugging Face repo the user typed in, outside the built-in catalogue. */
+  customModelRepo?: string;
+  /** Files from a folder the user chose, consulted before the network. */
+  localModelFiles?: [string, File][];
+  localModelLabel?: string;
+  /** Which conversational partner to run. */
+  presetId: string;
+  /** System prompt for the 'custom' preset. */
+  customPrompt: string;
 
   setPhase: (phase: Phase) => void;
   setScenario: (id: string) => void;
   setLearner: (learner: LearnerState) => void;
   setAllowCloud: (allow: boolean) => void;
   setModelId: (id: string | undefined) => void;
+  setCustomModelRepo: (repo: string | undefined) => void;
+  setLocalModel: (files: [string, File][] | undefined, label?: string) => void;
+  setPresetId: (id: string) => void;
+  setCustomPrompt: (prompt: string) => void;
   setSessionState: (state: SessionState) => void;
   setProgress: (progress: LoadProgress) => void;
   addTurn: (turn: Turn) => void;
@@ -54,12 +67,18 @@ export const useAppStore = create<AppStore>((set) => ({
   liveText: '',
   latency: [],
   allowCloud: false,
+  presetId: 'chat',
+  customPrompt: '',
 
   setPhase: (phase) => set({ phase }),
   setScenario: (scenarioId) => set({ scenarioId }),
   setLearner: (learner) => set({ learner }),
   setAllowCloud: (allowCloud) => set({ allowCloud }),
   setModelId: (modelId) => set({ modelId }),
+  setCustomModelRepo: (customModelRepo) => set({ customModelRepo }),
+  setLocalModel: (localModelFiles, localModelLabel) => set({ localModelFiles, localModelLabel }),
+  setPresetId: (presetId) => set({ presetId }),
+  setCustomPrompt: (customPrompt) => set({ customPrompt }),
   setSessionState: (sessionState) => set({ sessionState }),
   setProgress: (progress) => set({ progress }),
   // The live caption is replaced by the committed turn, so it clears here

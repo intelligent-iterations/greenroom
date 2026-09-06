@@ -1,8 +1,8 @@
 {
-  "name": "greenroom",
+  "name": "voice-playground",
   "version": "0.1.0",
   "private": true,
-  "description": "Voice-first interview rehearsal that runs on-device.",
+  "description": "A browser playground for realtime on-device voice AI.",
   "license": "MIT",
   "packageManager": "pnpm@10.30.0",
   "engines": {

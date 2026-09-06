@@ -1,5 +1,8 @@
 import { ensureUser } from '../data/firebase.js';
 import {
+  BUILT_IN_PRESETS,
+  customPreset,
+  interviewPreset,
   DEFAULT_POLICY,
   NON_LLM_STAGE_VRAM_MB,
   findScenario,
@@ -73,9 +76,24 @@ export function useSession() {
 
   const start = useCallback(
     async (learner: LearnerState) => {
-      const scenario = findScenario(useAppStore.getState().scenarioId);
+      const app = useAppStore.getState();
       const selected = routing?.selected;
-      if (!scenario) return store.setError('That scenario is no longer available.');
+
+      // Resolve who the model is playing. Interview presets go through the
+      // pedagogical compiler; everything else is a literal prompt.
+      const preset = app.presetId.startsWith('interview:')
+        ? interviewPreset(app.presetId.slice('interview:'.length), learner)
+        : app.presetId === 'custom'
+          ? customPreset(app.customPrompt)
+          : BUILT_IN_PRESETS.find((p) => p.id === app.presetId);
+
+      if (!preset) return store.setError('That conversation partner is unavailable.');
+
+      // The checks and the debrief still want a scenario; the interview presets
+      // carry one, and the generic partners borrow the first as a stand-in.
+      const scenario =
+        findScenario(app.presetId.replace('interview:', '')) ?? findScenario('backend-mid-en');
+      if (!scenario) return store.setError('Scenario catalogue is empty.');
       if (!selected) {
         return store.setError(
           'This device cannot run a private session and cloud inference is turned off. Turn on cloud inference, or try a browser with WebGPU.',
@@ -91,8 +109,9 @@ export function useSession() {
       const { InferencePipeline } = await import('../voice/pipeline-worker.js');
       const onDevice = selected.vendor === 'on-device';
       const pipeline = new InferencePipeline(
-        scenario.language,
-        onDevice ? selected.id : undefined,
+        preset.language,
+        onDevice ? (app.customModelRepo ?? selected.id) : undefined,
+        app.localModelFiles,
       );
 
       // Even on the cloud route, recognition and the voice stay on this device.
@@ -116,6 +135,7 @@ export function useSession() {
       await pipeline.primeAudio();
 
       const session = new InterviewSession({
+        preset,
         scenario,
         learner,
         // On-device models cannot follow the full prompt; see PromptStyle.

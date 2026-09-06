@@ -1,20 +1,24 @@
-# Greenroom
+# Realtime local voice playground
 
-**Voice-first interview rehearsal that runs on your device.**
+**A place to hear what on-device voice models actually sound like — and to find
+out whether they hold a role.**
 
 Live: **https://greenroom-ii.web.app**
 
-You talk. It listens, asks a real follow-up, and talks back — and on a machine
-with WebGPU, none of your audio, your transcript or your answers leave the
-browser. Speech recognition, the language model and the voice are all running
-locally in the tab.
+You talk, it answers, you interrupt it mid-sentence and it stops. Speech
+recognition, the language model and the voice all run in the browser tab. On a
+machine with WebGPU, no audio and no transcript leaves the device.
 
-That is the whole idea. People rehearse job interviews because they are nervous
-about them, and asking someone to upload their worst answers about their worst
-professional decisions to a third party is a bad trade. Running on-device makes
-the privacy question disappear rather than answering it in a policy page — and
-as a side effect, a deployment with no data egress is a much shorter
-conversation with anyone reviewing data residency.
+Pick a partner — an open conversation, a language tutor, a difficult customer,
+or a system prompt you write yourself. Pick a model: one of four bundled tiers
+from 260 MB to 2.7 GB, any Hugging Face repository with ONNX weights, or a
+folder of models you already have on disk. Then check your work: upload a CSV of
+cases and score the model on the machine in front of you.
+
+This started as an interview trainer, and that survives as one preset among
+several — including its pedagogical prompt layer, which is the most interesting
+prompt in the repository. But the durable part turned out to be the pipeline and
+the measurement around it, so that is what this is now.
 
 ---
 

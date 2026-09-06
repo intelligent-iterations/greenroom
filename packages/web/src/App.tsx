@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { AccountBar } from './components/AccountBar.js';
 import { DebriefScreen } from './components/DebriefScreen.js';
+import { EvalsScreen } from './components/EvalsScreen.js';
 import { SessionScreen } from './components/SessionScreen.js';
 import { SetupScreen } from './components/SetupScreen.js';
 import { loadLearnerState } from './state/learner.js';
@@ -11,6 +12,7 @@ export function App() {
   const phase = useAppStore((s) => s.phase);
   const learner = useAppStore((s) => s.learner);
   const setLearner = useAppStore((s) => s.setLearner);
+  const setPhase = useAppStore((s) => s.setPhase);
   const session = useSession();
 
   useEffect(() => {
@@ -22,7 +24,9 @@ export function App() {
       <header className="app__header">
         <span className="app__mark" aria-hidden="true" />
         <h1>Greenroom</h1>
-        <p className="app__tagline">Interview practice that never leaves your device</p>
+        <p className="app__tagline">
+          A playground for realtime voice models that run on your device
+        </p>
         {phase === 'setup' && <AccountBar />}
       </header>
 
@@ -33,6 +37,8 @@ export function App() {
           <SetupScreen learner={learner} session={session} />
         ) : phase === 'live' ? (
           <SessionScreen session={session} />
+        ) : phase === 'evals' ? (
+          <EvalsScreen onExit={() => setPhase('setup')} />
         ) : (
           <DebriefScreen learner={learner} session={session} />
         )}

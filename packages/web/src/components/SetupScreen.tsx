@@ -1,8 +1,10 @@
-import { COMPETENCY_LABELS, SCENARIOS, type CefrLevel, type LearnerState } from '@greenroom/shared';
+import { type CefrLevel, type LearnerState } from '@greenroom/shared';
 import { useState } from 'react';
 import { useAppStore } from '../state/store.js';
 import type { useSession } from '../state/useSession.js';
 import { DeviceReadiness } from './DeviceReadiness.js';
+import { ModelSource } from './ModelSource.js';
+import { PresetPicker } from './PresetPicker.js';
 
 const LEVELS: CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
@@ -13,42 +15,14 @@ export function SetupScreen({
   learner: LearnerState;
   session: ReturnType<typeof useSession>;
 }) {
-  const { scenarioId, setScenario, setLearner, error } = useAppStore();
+  const { setLearner, error } = useAppStore();
   const [starting, setStarting] = useState(false);
 
-  const scenario = SCENARIOS.find((s) => s.id === scenarioId);
   const ready = Boolean(session.routing?.selected);
 
   return (
     <div className="stack">
-      <section className="card">
-        <h2>Choose a scenario</h2>
-        <div className="scenario-grid">
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={`scenario ${s.id === scenarioId ? 'scenario--active' : ''}`}
-              onClick={() => setScenario(s.id)}
-              aria-pressed={s.id === scenarioId}
-            >
-              <strong>{s.title}</strong>
-              <span className="muted">
-                {s.company} · {s.language.toUpperCase()}
-              </span>
-            </button>
-          ))}
-        </div>
-        {scenario && (
-          <p className="muted">
-            Trains{' '}
-            {scenario.targetCompetencies
-              .map((c) => COMPETENCY_LABELS[c].toLowerCase())
-              .join(', ')}
-            . About {scenario.maxTurns} questions.
-          </p>
-        )}
-      </section>
+      <PresetPicker learner={learner} />
 
       <section className="card">
         <h2>Your language level</h2>
@@ -72,6 +46,8 @@ export function SetupScreen({
 
       <DeviceReadiness session={session} />
 
+      <ModelSource />
+
       {error && <p className="error">{error}</p>}
 
       <button
@@ -86,6 +62,12 @@ export function SetupScreen({
       >
         {starting ? 'Loading models…' : 'Start the interview'}
       </button>
+      <p className="muted small">
+        <button type="button" className="link" onClick={() => useAppStore.getState().setPhase('evals')}>
+          Run your own evaluations
+        </button>{' '}
+        against whichever model you pick.
+      </p>
       <p className="muted small">
         The first run downloads about 1.2 GB of models and caches them. After that it works offline.
       </p>
