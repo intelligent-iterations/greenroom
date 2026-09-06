@@ -18,6 +18,7 @@
     "eval:gate": "pnpm build:shared && pnpm --filter @greenroom/evals gate"
   },
   "devDependencies": {
+    "firebase-tools": "15.29.0",
     "typescript": "^7.0.2"
   }
 }

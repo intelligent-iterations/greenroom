@@ -108,7 +108,11 @@ jobs:
             firestore-rules) ONLY=firestore ;;
             everything)      ONLY=hosting,functions,firestore ;;
           esac
-          npx --yes firebase-tools@latest deploy --only "$ONLY" \
+          # Pinned and installed from the lockfile, not `npx @latest`. Two
+          # reasons: an unreviewed version of a CLI holding deploy credentials
+          # is a supply-chain gap, and re-downloading it on every run cost
+          # minutes. `pnpm install` above already fetched it.
+          pnpm exec firebase deploy --only "$ONLY" \
             --project "$FIREBASE_PROJECT" --non-interactive --force
 
       # The checks that were previously run by hand after every deploy. Each one
