@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runChecks, criticalCheckFailures } from './checks.ts';
+import { LexicalRetriever, buildCorpus } from './deps.ts';
 import {
   PROMPT_VERSION,
   RUBRIC,
@@ -102,11 +103,31 @@ export async function runCase(
     ...testCase.learner,
   };
 
+  // The same retrieval the session does, from the same corpus builder, so the
+  // harness scores the prompt that ships rather than one it made up. Cases with
+  // no documents and a scenario with no notes retrieve nothing and compile
+  // exactly as they did before grounding existed.
+  const question = scenario.requiredQuestions[0] ?? scenario.role;
+  const lastAnswer = [...testCase.transcript].reverse().find((t) => t.role === 'learner')?.text;
+  const retriever = new LexicalRetriever();
+  await retriever.index(
+    buildCorpus(
+      scenario,
+      testCase.documents.map((d) => ({ ...d, updatedAt: 0 })),
+    ),
+  );
+  const passages = await retriever.retrieve({
+    question,
+    ...(lastAnswer ? { lastAnswer } : {}),
+    limit: options.promptStyle === 'compact' ? 1 : 4,
+  });
+
   const prompt = compileInterviewerPrompt({
     scenario,
     learner,
     ...(options.promptStyle ? { style: options.promptStyle } : {}),
     ...(scenario.requiredQuestions[0] ? { nextQuestion: scenario.requiredQuestions[0] } : {}),
+    ...(passages.length > 0 ? { passages } : {}),
   });
   const messages: ChatMessage[] = [
     { role: 'system', content: prompt.system },
@@ -138,6 +159,7 @@ export async function runCase(
   const checks = runChecks(turn, scenario, {
     ...(previousInterviewerTurns.length ? { previousInterviewerTurns } : {}),
     ...(lastCandidateAnswer ? { lastCandidateAnswer } : {}),
+    ...(passages.length > 0 ? { injectedPassages: passages.map((p) => p.text) } : {}),
   });
 
   let scores: Score[] = [];

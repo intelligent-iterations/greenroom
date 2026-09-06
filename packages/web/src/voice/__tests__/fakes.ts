@@ -80,6 +80,14 @@ export class ScriptedModel implements LanguageModel {
    *  optional-method path is exercised too. */
   warmUp?: (systemPrompt: string) => Promise<void>;
   receivedMessages: ChatMessage[][] = [];
+
+  /**
+   * The system message from each generate() call — that is, what the prompt
+   * layer actually produced, which is the thing worth asserting on.
+   */
+  get systemPrompts(): string[] {
+    return this.receivedMessages.map((m) => m.find((x) => x.role === 'system')?.content ?? '');
+  }
   #pending: string[] = [];
   #gate = deferred();
   #done = false;

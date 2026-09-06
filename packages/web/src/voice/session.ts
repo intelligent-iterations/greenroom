@@ -11,6 +11,8 @@ import {
   type SpeechRecognizer,
   type SpeechSynthesizer,
   type PromptStyle,
+  type RetrievedPassage,
+  type Retriever,
   type Turn,
   type TurnTimings,
   type VoicePreset,
@@ -65,6 +67,15 @@ export interface SessionConfig {
    * see the note on PromptStyle for why this is a capability decision.
    */
   promptStyle?: PromptStyle;
+  /**
+   * Grounding. Absent, the session behaves exactly as it did before retrieval
+   * existed and the compiler falls back to the scenario's own context notes.
+   *
+   * Indexed by the caller, because the corpus is assembled from the scenario
+   * and the learner's own documents and the session should not know about
+   * either.
+   */
+  retriever?: Retriever;
 }
 
 /**
@@ -108,6 +119,9 @@ export class InterviewSession extends Emitter<SessionEvents> {
   #vad?: VadController;
   #state: SessionState = 'idle';
   #turns: Turn[] = [];
+  #retriever?: Retriever;
+  /** Passages given to the model this turn, for the checks and the record. */
+  #passages: RetrievedPassage[] = [];
   #interviewerTurnCount = 0;
 
   /** Aborts the in-flight interviewer turn. Replaced each turn. */
@@ -130,6 +144,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
     if (config.vad) this.#vad = config.vad;
     this.#promptStyle = config.promptStyle ?? 'full';
     this.#preset = config.preset;
+    if (config.retriever) this.#retriever = config.retriever;
     this.prompt = this.#compilePrompt();
   }
 
@@ -141,9 +156,12 @@ export class InterviewSession extends Emitter<SessionEvents> {
    * Coverage is bookkeeping, and software is better at it than a 1.7B model.
    */
   #compilePrompt(): CompiledPrompt {
-    // A preset is already a finished prompt; there is nothing to compile and
-    // no coverage to advance.
-    if (this.#preset) {
+    // A playground preset is already a finished prompt: nothing to compile and
+    // no coverage to advance. An interview preset carries the scenario it was
+    // built from, and is recompiled per turn instead — a frozen string cannot
+    // advance coverage or carry a passage retrieved for the answer that was
+    // just given.
+    if (this.#preset && !this.#preset.scenarioId) {
       return { version: 'preset', system: this.#preset.systemPrompt, focus: [] };
     }
 
@@ -154,6 +172,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
       learner: this.#learner,
       style: this.#promptStyle,
       ...(questions[index] ? { nextQuestion: questions[index] } : {}),
+      ...(this.#passages.length > 0 ? { passages: this.#passages } : {}),
     });
   }
 
@@ -278,10 +297,54 @@ export class InterviewSession extends Emitter<SessionEvents> {
     }
   }
 
+  /**
+   * Pick the passages for this turn.
+   *
+   * Queried on the question being worked toward plus the learner's last answer,
+   * which is what makes grounding conversational rather than static.
+   *
+   * Timed and logged because the lexical retriever is sub-millisecond but the
+   * interface is async on purpose: an embedding retriever would add directly to
+   * time-to-first-token, and that has to show up in the instrumentation rather
+   * than be discovered in a session.
+   */
+  async #retrievePassages(): Promise<void> {
+    if (!this.#retriever) return;
+
+    const questions = this.scenario.requiredQuestions;
+    const index = Math.min(this.#questionIndex, questions.length - 1);
+    const lastAnswer = [...this.#turns].reverse().find((t) => t.role === 'learner')?.text;
+    const started = performance.now();
+
+    try {
+      this.#passages = await this.#retriever.retrieve({
+        question: questions[index] ?? this.scenario.role,
+        ...(lastAnswer ? { lastAnswer } : {}),
+        limit: this.#promptStyle === 'compact' ? 1 : 4,
+      });
+    } catch (err) {
+      // Grounding is an enhancement. A retriever that fails should cost the
+      // turn its context, not the session.
+      this.#passages = [];
+      logEvent('retrievalFailed', { message: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    logEvent('retrieval', {
+      ms: Math.round(performance.now() - started),
+      sources: this.#passages.map((p) => p.sourceId),
+    });
+  }
+
   /** Generates and speaks one interviewer turn, streaming sentence by sentence. */
   async #runInterviewerTurn(): Promise<void> {
+    // Retrieval first, because the prompt compiler is pure and takes the
+    // passages as data. Awaited rather than fired off: a turn grounded in what
+    // the learner said two turns ago is not grounded.
+    await this.#retrievePassages();
+
     // Recompiled each turn so the prompt names the question currently being
-    // worked toward. Cheap: it is a pure function of scenario and learner.
+    // worked toward, and carries whatever was just retrieved.
     (this as { prompt: CompiledPrompt }).prompt = this.#compilePrompt();
 
     const abort = new AbortController();

@@ -38,6 +38,18 @@ export const VoicePreset = z.object({
   voice: z.string().optional(),
   /** Free-text presets are editable; built-in ones are not. */
   editable: z.boolean().default(false),
+  /**
+   * The scenario this preset was compiled from, when it was one.
+   *
+   * Freezing a compiled prompt was right while the prompt was a pure function
+   * of scenario and learner alone. Per-turn retrieval makes it wrong: a frozen
+   * string cannot carry a passage chosen in response to the answer the
+   * candidate just gave. Carrying the id lets the orchestrator recompile
+   * instead of replay — for interview presets only. The built-in partners and
+   * a prompt the user typed have no scenario and keep the frozen path exactly
+   * as it was.
+   */
+  scenarioId: z.string().min(1).optional(),
 });
 export type VoicePreset = z.infer<typeof VoicePreset>;
 
@@ -145,6 +157,7 @@ export function interviewPreset(
     systemPrompt: compiled.system,
     openingMessage: "I'm ready to begin.",
     maxTurns: scenario.maxTurns,
+    scenarioId: scenario.id,
   });
 }
 

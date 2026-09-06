@@ -1,4 +1,5 @@
-import type { InterviewScenario, LearnerState } from '@greenroom/shared';
+import type { InterviewScenario, LearnerState, Retriever, VoicePreset } from '@greenroom/shared';
+import { LexicalRetriever, buildCorpus, customPreset, interviewPreset } from '@greenroom/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InterviewSession, type SessionState } from '../session.js';
 import { FakeRecognizer, FakeSynthesizer, FakeVad, ScriptedModel, flush } from './fakes.js';
@@ -39,7 +40,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-function build(overrides: { synth?: FakeSynthesizer; transcripts?: string[] } = {}) {
+function build(
+  overrides: {
+    synth?: FakeSynthesizer;
+    transcripts?: string[];
+    retriever?: Retriever;
+    preset?: VoicePreset;
+  } = {},
+) {
   const vad = new FakeVad();
   const model = new ScriptedModel();
   const recognizer = new FakeRecognizer(overrides.transcripts ?? []);
@@ -51,6 +59,8 @@ function build(overrides: { synth?: FakeSynthesizer; transcripts?: string[] } = 
     learner,
     vad,
     stages: { recognizer, model, synthesizer },
+    ...(overrides.retriever ? { retriever: overrides.retriever } : {}),
+    ...(overrides.preset ? { preset: overrides.preset } : {}),
   });
   session.on('state', (s) => states.push(s));
   return { session, vad, model, recognizer, synthesizer, states };
@@ -347,5 +357,83 @@ describe('InterviewSession lifecycle', () => {
 
     expect(errors.map((e) => e.message)).toEqual(['audio device lost']);
     expect(synthesizer.spoken).toContain('Second sentence here.');
+  });
+});
+
+describe('grounding', () => {
+  // The note has to share terms with the question being asked, or the
+  // relevance floor suppresses it — which is the retriever working, not
+  // failing. The required question here is "Walk me through a system you owned."
+  const grounded = {
+    ...scenario,
+    contextNotes: ['The system they owned was the payments service, running on Postgres.'],
+  };
+
+  async function indexed(): Promise<Retriever> {
+    const retriever = new LexicalRetriever();
+    await retriever.index(buildCorpus(grounded, []));
+    return retriever;
+  }
+
+  it('puts a retrieved passage in the system message', async () => {
+    const retriever = await indexed();
+    const { session, model } = build({ retriever });
+    const started = session.start();
+    await flush();
+    model.script('What does the team run for storage?');
+    await started;
+
+    expect(model.systemPrompts[0]).toContain('Postgres');
+  });
+
+  it('behaves exactly as before when no retriever is given', async () => {
+    const { session, model } = build();
+    const started = session.start();
+    await flush();
+    model.script('Walk me through a system you owned.');
+    await started;
+
+    expect(model.systemPrompts[0]).not.toContain('One thing you know');
+  });
+
+  // Grounding is an enhancement. A retriever that throws should cost the turn
+  // its context, not end the interview.
+  it('survives a retriever that throws', async () => {
+    const broken: Retriever = {
+      id: 'broken',
+      async index() {},
+      async retrieve() {
+        throw new Error('index unavailable');
+      },
+    };
+    const { session, model } = build({ retriever: broken });
+    const started = session.start();
+    await flush();
+    model.script('Walk me through a system you owned.');
+    await started;
+
+    expect(session.turns).toHaveLength(1);
+  });
+});
+
+describe('interview presets recompile, playground presets do not', () => {
+  // Before scenarioId existed, an interview preset froze nextQuestion at the
+  // first required question for the whole session, so on-device coverage never
+  // advanced even though questionIndex was being computed. This is that fix.
+  it('carries the scenario id, so the orchestrator recompiles instead of replaying', () => {
+    // A real catalogue scenario: interviewPreset looks the id up in SCENARIOS.
+    const preset = interviewPreset('backend-mid-en', learner);
+    expect(preset?.scenarioId).toBe('backend-mid-en');
+  });
+
+  it('still replays a playground preset verbatim', async () => {
+    const preset = customPreset('You are a friendly conversation partner.');
+    const { session, model } = build({ preset });
+    const started = session.start();
+    await flush();
+    model.script('How has your week been?');
+    await started;
+
+    expect(model.systemPrompts[0]).toBe('You are a friendly conversation partner.');
   });
 });

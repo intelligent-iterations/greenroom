@@ -36,6 +36,22 @@ export const EvalCase = z.object({
    * backend overwrites them with real captures, and that is what a release
    * baseline should be measured on — see docs/EVALUATION.md.
    */
+  /**
+   * Documents the learner supplied, for grounding cases.
+   *
+   * Carried on the case rather than fetched, so the harness stays offline and
+   * a grounding regression is reproducible from the dataset alone.
+   */
+  documents: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        kind: z.enum(['cv', 'job_description', 'notes']).default('cv'),
+        title: z.string().min(1).max(120).default('Document'),
+        text: z.string().max(20_000),
+      }),
+    )
+    .default([]),
   referenceTurn: z.string().optional(),
   /** Tags for slicing the report: 'adversarial', 'fr', 'calibration'. */
   tags: z.array(z.string()).default([]),

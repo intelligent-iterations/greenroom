@@ -53,7 +53,7 @@ describe('evaluateGates', () => {
   it('fails on any critical failure regardless of the average', () => {
     const results = [
       {
-        case: { id: 'c1', scenario: 's', probes: 'p', learner: {}, transcript: [], tags: [] },
+        case: { id: 'c1', scenario: 's', probes: 'p', learner: {}, transcript: [], tags: [], documents: [] },
         turn: 'x',
         checks: [],
         scores: [],
@@ -104,7 +104,7 @@ describe('evaluateGates', () => {
   it('still fails a deterministic-only run that hit a critical check', () => {
     const results = [
       {
-        case: { id: 'c1', scenario: 's', probes: 'p', learner: {}, transcript: [], tags: [] },
+        case: { id: 'c1', scenario: 's', probes: 'p', learner: {}, transcript: [], tags: [], documents: [] },
         turn: 'x',
         checks: [],
         scores: [],

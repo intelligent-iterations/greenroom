@@ -1,3 +1,4 @@
+import type { RetrievedPassage } from './retrieval.js';
 import {
   COMPETENCY_LABELS,
   MIN_CONFIDENT_OBSERVATIONS,
@@ -24,7 +25,7 @@ import {
  * version in its report and the CI gate compares against the baseline captured
  * under the previous version.
  */
-export const PROMPT_VERSION = '2026-09-05.5';
+export const PROMPT_VERSION = '2026-09-06.1';
 
 /**
  * CEFR governs *how* the interviewer speaks. It deliberately does not govern
@@ -112,6 +113,39 @@ export interface CompileInput {
    * full prompt is long, and it is bookkeeping software does better.
    */
   nextQuestion?: string;
+  /**
+   * Passages retrieved for this turn, already chosen upstream.
+   *
+   * Omitted — which is every call site that has not opted into grounding — the
+   * compiler falls back to the scenario's own context notes and produces a
+   * byte-identical string to the one it produced before retrieval existed.
+   * That fallback is what makes this an additive change to a versioned pure
+   * function rather than a rewrite of one, and there is a snapshot test holding
+   * it to that.
+   *
+   * Retrieval itself happens in the orchestrator, not here: compilation has no
+   * clocks, no randomness and no I/O, and the harness depends on it.
+   */
+  passages?: RetrievedPassage[];
+}
+
+/**
+ * Longest grounding passage the compact prompt will carry.
+ *
+ * The compact prompt is about 130 tokens and exists because a 1.7B model given
+ * the full one collapses to one-word replies. One passage at this length adds
+ * roughly 38, which is a real increase in a budget that was measured rather
+ * than chosen. Truncation is at a word boundary and adds no ellipsis, because
+ * an ellipsis is a token the synthesiser may read aloud.
+ */
+const COMPACT_PASSAGE_CHARS = 140;
+
+function truncateWords(text: string, limit: number): string {
+  const collapsed = text.trim().replace(/\s+/g, ' ');
+  if (collapsed.length <= limit) return collapsed;
+  const cut = collapsed.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim();
 }
 
 /**
@@ -174,6 +208,12 @@ function compileCompactPrompt(input: CompileInput): CompiledPrompt {
   const focus = selectFocusCompetencies(scenario, learner);
   const question = input.nextQuestion ?? scenario.requiredQuestions[0] ?? '';
   const lang = scenario.language === 'fr' ? 'Reply in French only.' : '';
+  // Exactly one passage, not two. The budget above is measured, and the failure
+  // it protects against is not degraded output but a model that stops asking
+  // questions altogether.
+  const known = input.passages?.[0]
+    ? truncateWords(input.passages[0].text, COMPACT_PASSAGE_CHARS)
+    : '';
 
   // Ordering is load-bearing. Small models weight the end of a prompt most, so
   // the single non-negotiable output constraint goes last and describes the
@@ -187,6 +227,11 @@ function compileCompactPrompt(input: CompileInput): CompiledPrompt {
     `Never answer your own question. Never say what a good answer contains. Never give feedback, scores or praise.`,
     `If their last answer was vague, ask for the missing specific instead of moving on.`,
     lang,
+    // Stated as a fact rather than an instruction, so a small model holds it
+    // instead of reciting it. Placed before the final two lines so the output
+    // constraint and the topic keep the end of the prompt, which is the part
+    // these models weight hardest.
+    known ? `One thing you know: ${known}` : '',
     `Your entire reply must be ONE short question, under 30 words, ending in a question mark. Nothing else — no greeting, no comment on their answer.`,
     `Ask about: ${question}`,
   ]
@@ -248,9 +293,16 @@ In past sessions this candidate has shown: ${reraisedError}
 Give them at least one natural opportunity to do better on this. Do not mention their history.`);
   }
 
-  if (scenario.contextNotes.length > 0) {
+  // Retrieved passages replace the scenario's notes rather than joining them:
+  // the corpus the retriever searched already contains those notes, so merging
+  // would show the chosen ones twice.
+  const known = input.passages?.length
+    ? input.passages.map((p) => p.text)
+    : scenario.contextNotes;
+
+  if (known.length > 0) {
     sections.push(`# What you know
-${scenario.contextNotes.map((n) => `- ${n}`).join('\n')}
+${known.map((n) => `- ${n}`).join('\n')}
 Treat these as your own knowledge. If the candidate contradicts one, probe it once rather than accepting or correcting flatly.`);
   }
 
