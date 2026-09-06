@@ -27,11 +27,13 @@ import {
   type PreTrainedModel,
   type PreTrainedTokenizer,
 } from '@huggingface/transformers';
+import { createLocalCache } from './local-models.js';
+import { env } from '@huggingface/transformers';
 import { findStage } from './model-manifest.js';
 import type { ChatMessage } from '@greenroom/shared';
 
 export type WorkerRequest =
-  | { type: 'load'; language: 'en' | 'fr'; llmRepo?: string }
+  | { type: 'load'; language: 'en' | 'fr'; llmRepo?: string; localFiles?: [string, File][] }
   | { type: 'warmUp'; systemPrompt: string }
   | { type: 'transcribe'; id: number; audio: Float32Array }
   | { type: 'generate'; id: number; messages: ChatMessage[]; maxTokens: number; temperature: number }
@@ -73,7 +75,14 @@ const progressOf = (info: unknown): number =>
     ? (info as { progress: number }).progress / 100
     : 0;
 
-async function load(llmRepo?: string): Promise<void> {
+async function load(llmRepo?: string, localFiles?: [string, File][]): Promise<void> {
+  // Files the user pointed us at answer before the network does. Partial
+  // folders are fine: anything absent falls through and is downloaded.
+  if (localFiles?.length) {
+    env.useCustomCache = true;
+    env.customCache = createLocalCache(new Map(localFiles));
+  }
+
   const stt = findStage('stt');
   const llmSpec = findStage('llm');
   const ttsSpec = findStage('tts');
@@ -167,7 +176,7 @@ worker.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       switch (request.type) {
         case 'load':
           language = request.language;
-          await load(request.llmRepo);
+          await load(request.llmRepo, request.localFiles);
           break;
 
         case 'warmUp':

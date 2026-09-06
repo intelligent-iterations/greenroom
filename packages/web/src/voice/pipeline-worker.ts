@@ -51,6 +51,8 @@ export class InferencePipeline {
     private language: 'en' | 'fr' = 'en',
     /** Hugging Face repo of the chosen interviewer model; manifest default if unset. */
     private llmRepo?: string,
+    /** Files from a folder the user chose, consulted before the network. */
+    private localFiles?: [string, File][],
   ) {
     this.#worker = new Worker(new URL('./inference.worker.ts', import.meta.url), {
       type: 'module',
@@ -88,7 +90,12 @@ export class InferencePipeline {
         resolve: resolve as (v: never) => void,
         reject,
       });
-      this.#post({ type: 'load', language: this.language, ...(this.llmRepo ? { llmRepo: this.llmRepo } : {}) });
+      this.#post({
+        type: 'load',
+        language: this.language,
+        ...(this.llmRepo ? { llmRepo: this.llmRepo } : {}),
+        ...(this.localFiles?.length ? { localFiles: this.localFiles } : {}),
+      });
     });
     return this.#loadPromise;
   }

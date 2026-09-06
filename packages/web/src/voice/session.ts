@@ -13,6 +13,7 @@ import {
   type PromptStyle,
   type Turn,
   type TurnTimings,
+  type VoicePreset,
 } from '@greenroom/shared';
 import { logEvent } from './diagnostics.js';
 import { Emitter } from './emitter.js';
@@ -45,6 +46,15 @@ export interface SessionStages {
 }
 
 export interface SessionConfig {
+  /**
+   * Who the model is playing.
+   *
+   * When present the session runs the preset's prompt verbatim and does no
+   * coverage tracking — a playground partner has no required questions to work
+   * through. The scenario path below remains for the interview trainer, which
+   * needs the pedagogical compiler.
+   */
+  preset?: VoicePreset;
   scenario: InterviewScenario;
   learner: LearnerState;
   stages: SessionStages;
@@ -103,6 +113,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
   /** Aborts the in-flight interviewer turn. Replaced each turn. */
   #turnAbort?: AbortController;
   #promptStyle: PromptStyle;
+  #preset: VoicePreset | undefined;
   /** Which required question the interviewer is working toward. */
   #questionIndex = 0;
   /** Serialises TTS so sentences play in order. */
@@ -118,6 +129,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
     this.#learner = config.learner;
     if (config.vad) this.#vad = config.vad;
     this.#promptStyle = config.promptStyle ?? 'full';
+    this.#preset = config.preset;
     this.prompt = this.#compilePrompt();
   }
 
@@ -129,6 +141,12 @@ export class InterviewSession extends Emitter<SessionEvents> {
    * Coverage is bookkeeping, and software is better at it than a 1.7B model.
    */
   #compilePrompt(): CompiledPrompt {
+    // A preset is already a finished prompt; there is nothing to compile and
+    // no coverage to advance.
+    if (this.#preset) {
+      return { version: 'preset', system: this.#preset.systemPrompt, focus: [] };
+    }
+
     const questions = this.scenario.requiredQuestions;
     const index = Math.min(this.#questionIndex, questions.length - 1);
     return compileInterviewerPrompt({
@@ -341,7 +359,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
       // One required question, then room for a single follow-up, then move on.
       this.#questionIndex = Math.floor(this.#interviewerTurnCount / 2);
 
-      if (this.#interviewerTurnCount >= this.scenario.maxTurns) {
+      if (this.#interviewerTurnCount >= (this.#preset?.maxTurns ?? this.scenario.maxTurns)) {
         await this.end();
         return;
       }
@@ -409,7 +427,7 @@ export class InterviewSession extends Emitter<SessionEvents> {
     // answers a bare system prompt with a single word. Seeding the opening
     // gives it something to respond to. It is never shown to the learner.
     if (history.length === 0) {
-      history.push({ role: 'user', content: "I'm ready to begin." });
+      history.push({ role: 'user', content: this.#preset?.openingMessage ?? "I'm ready to begin." });
     }
 
     return [{ role: 'system', content: this.prompt.system }, ...history];
