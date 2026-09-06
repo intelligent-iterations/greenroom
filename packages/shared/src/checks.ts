@@ -90,7 +90,11 @@ const MID_SESSION_FEEDBACK = [
  * fails good output is worse than no check: it trains people to ignore it.
  */
 const IMPERATIVE_ASK = [
-  /\b(?:tell|talk|walk) me (?:about|through)\b/i,
+  // "tell me about the migration" and "tell me what you built" are the same
+  // move; only the first was matched, so two adversarial cases failed on turns
+  // that were asking perfectly clearly. The wh-word list keeps it tight — a
+  // bare "tell me" also appears in turns that are not asks.
+  /\b(?:tell|talk|walk) me (?:about|through|what|how|why|when|where|which|who|if|whether)\b/i,
   /\bdescribe\b/i,
   /\bexplain\b/i,
   /\bgive me an example\b/i,

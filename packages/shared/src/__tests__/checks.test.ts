@@ -65,6 +65,26 @@ describe('asks_a_question: turns that legitimately ask nothing', () => {
   });
 });
 
+describe('asks_a_question: imperative asks with a wh-word', () => {
+  // Both of these are real turns from the first live run against a hosted
+  // model. They ask plainly, and the check failed them, because the pattern
+  // wanted "tell me about" and they said "tell me what".
+  it('accepts "tell me what you built"', () => {
+    const turn =
+      'I want your real answer, not mine. Just tell me what you built, the decisions you made, and how it ended up in production.';
+    expect(result(turn, 'asks_a_question')?.passed).toBe(true);
+  });
+
+  it('accepts "tell me how you would narrow it down"', () => {
+    const turn = "Let's say North America to start, and tell me how you would narrow it down from there.";
+    expect(result(turn, 'asks_a_question')?.passed).toBe(true);
+  });
+
+  it('still fails a turn that only makes a statement', () => {
+    expect(result('That is a good place to leave it.', 'asks_a_question')?.passed).toBe(false);
+  });
+});
+
 describe('interviewer_register', () => {
   it.each([
     'How can I help you today?',

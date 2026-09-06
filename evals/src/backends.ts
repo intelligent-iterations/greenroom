@@ -135,6 +135,131 @@ export class GeminiBackend implements EvalBackend {
   }
 }
 
+/**
+ * OpenRouter, OpenAI-compatible.
+ *
+ * A single key reaching many vendors, which is what makes it the right backend
+ * for a harness whose job is comparing them on identical inputs. Note the cost
+ * of that convenience: a request is routed to whichever upstream provider
+ * OpenRouter picks, so the model is reproducible but the *jurisdiction* is not.
+ * That is why routing.ts gives it `multi-region` residency and the default
+ * policy refuses it — see docs/adr/0003-model-portability.md.
+ *
+ * Reasoning models need handling here, and getting it wrong is expensive in a
+ * way that is hard to see. `max_tokens` bounds reasoning AND content together,
+ * so a model that thinks for 163 tokens inside a 200-token budget returns an
+ * empty string with `finish_reason: 'stop'`. That scores as a critical
+ * `non_empty` failure and reads as a catastrophic model regression, which sends
+ * someone off to bisect a prompt that was fine — the same trap judge.ts guards
+ * against when a verdict comes back unparseable. GLM 5.3 Flash cannot disable
+ * reasoning at all ("Reasoning is mandatory for this endpoint"), so the answer
+ * is to ask for the least of it and to budget for it separately.
+ */
+/**
+ * Extra tokens granted on top of the caller's turn budget, for models that
+ * think before answering.
+ *
+ * Sized from measured runs rather than guessed: GLM 5.3 Flash at
+ * `effort: 'minimal'` usually spends ~50 tokens, but a French opening turn
+ * took 712, so `minimal` is a hint and not a cap. Generous on purpose — the
+ * headroom is only ever spent by models that need it, at a fraction of a cent,
+ * and the failure it prevents is an empty turn that reads as a quality
+ * collapse. A model that exhausts even this errors by name rather than
+ * returning nothing.
+ */
+const REASONING_HEADROOM_TOKENS = 512;
+
+/**
+ * How many times to re-ask when reasoning ate the whole budget.
+ *
+ * A fixed headroom is whack-a-mole: `effort: 'minimal'` is a hint, not a cap,
+ * and the same model spent 50 tokens on one case and 1736 on another. So the
+ * budget escalates instead of being guessed — doubling per attempt, bounded,
+ * then failing by name. Same shape as the judge's retry in judge.ts, for the
+ * same reason: a bounded retry is honest, a silent empty result is not.
+ */
+const MAX_BUDGET_ATTEMPTS = 3;
+
+export class OpenRouterBackend implements EvalBackend {
+  readonly id: string;
+  #model: string;
+
+  constructor(model = process.env.OPENROUTER_MODEL ?? 'z-ai/glm-5.3-flash-20260826') {
+    this.#model = model;
+    this.id = `openrouter:${model}`;
+  }
+
+  async complete(
+    messages: ChatMessage[],
+    options: { temperature?: number; maxTokens?: number } = {},
+  ): Promise<string> {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error('Set OPENROUTER_API_KEY');
+
+    // The caller's budget is about the spoken turn. The provider's is about
+    // everything the model emits, thinking included, so it is granted on top
+    // rather than shared — otherwise the two budgets silently compete and the
+    // turn is what loses.
+    const turnTokens = options.maxTokens ?? 200;
+    let headroom = REASONING_HEADROOM_TOKENS;
+    let lastReason = '';
+
+    for (let attempt = 1; attempt <= MAX_BUDGET_ATTEMPTS; attempt += 1) {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: this.#model,
+          messages,
+          temperature: options.temperature ?? 0.6,
+          max_tokens: turnTokens + headroom,
+          // Ignored by models that do not reason; the ones that do are told to
+          // spend as little as they can. An interviewer turn is one short
+          // spoken question, and deliberation is latency the product cannot
+          // afford — the same reason routing.ts prefers a non-reasoning default.
+          reasoning: { effort: 'minimal' },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`OpenRouter returned ${response.status}: ${await response.text()}`);
+      }
+
+      const body = (await response.json()) as {
+        choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
+        usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
+        // OpenRouter reports an upstream failure as a 200 with an error body,
+        // which would otherwise surface as an empty turn and score as a model
+        // regression rather than as the outage it is.
+        error?: { message?: string };
+      };
+      if (body.error) {
+        throw new Error(`OpenRouter upstream error: ${body.error.message ?? 'unknown'}`);
+      }
+
+      const choice = body.choices?.[0];
+      const content = choice?.message?.content ?? '';
+      if (content.length > 0) return content;
+
+      const reasoningTokens = body.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+      lastReason =
+        reasoningTokens > 0
+          ? `spent its whole budget reasoning (${reasoningTokens} tokens, ` +
+            `finish_reason ${choice?.finish_reason ?? 'unknown'}, max_tokens ${turnTokens + headroom})`
+          : `returned an empty turn (finish_reason ${choice?.finish_reason ?? 'unknown'})`;
+      // Only a budget problem is worth re-asking. An empty turn with no
+      // reasoning spent is the model declining, and repeating the request will
+      // not change its mind.
+      if (reasoningTokens === 0) break;
+      headroom *= 2;
+    }
+
+    // Fail loudly and name the cause. An empty turn returned quietly is
+    // indistinguishable from a model that has become terrible, and that is the
+    // bisect nobody should be sent on.
+    throw new Error(`${this.id} ${lastReason} after ${MAX_BUDGET_ATTEMPTS} attempts`);
+  }
+}
+
 export function makeBackend(name: string, recorded: Map<string, string>): EvalBackend {
   switch (name) {
     case 'replay':
@@ -147,7 +272,9 @@ export function makeBackend(name: string, recorded: Map<string, string>): EvalBa
       return new AzureBackend();
     case 'gemini':
       return new GeminiBackend();
+    case 'openrouter':
+      return new OpenRouterBackend();
     default:
-      throw new Error(`Unknown backend "${name}". Use replay, azure or gemini.`);
+      throw new Error(`Unknown backend "${name}". Use replay, azure, gemini or openrouter.`);
   }
 }
