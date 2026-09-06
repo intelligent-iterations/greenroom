@@ -123,7 +123,21 @@ export async function runCase(
     return emptyResult(testCase, err instanceof Error ? err.message : String(err));
   }
 
-  const checks = runChecks(turn, scenario);
+  // The context matters: without it `not_echoing` and `not_repeating` are
+  // present in every report and can never fire, which is the "looks like
+  // coverage" failure checks.ts warns about. The transcript the case already
+  // carries is exactly what they need.
+  const previousInterviewerTurns = testCase.transcript
+    .filter((t) => t.role === 'interviewer')
+    .map((t) => t.text);
+  const lastCandidateAnswer = [...testCase.transcript]
+    .reverse()
+    .find((t) => t.role === 'learner')?.text;
+
+  const checks = runChecks(turn, scenario, {
+    ...(previousInterviewerTurns.length ? { previousInterviewerTurns } : {}),
+    ...(lastCandidateAnswer ? { lastCandidateAnswer } : {}),
+  });
 
   let scores: Score[] = [];
   if (options.judge) {

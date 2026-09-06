@@ -96,7 +96,7 @@ your answers off-device.
 Other useful commands:
 
 ```bash
-pnpm test         # 103 unit tests across four packages
+pnpm test         # 216 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -423,7 +423,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 103 unit tests across four packages, including the pipeline concurrency:
+- 216 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
@@ -432,8 +432,8 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 - Every package typechecks under TypeScript strict mode with
   `noUncheckedIndexedAccess`.
 - The web app builds. Lazy-loading the model adapters took the initial bundle
-  from 9.5 MB to 819 KB; Whisper, WebLLM and Kokoro load only when a session
-  actually starts.
+  from 9.5 MB to 819 KB; transformers.js, the ONNX runtime and Kokoro load
+  only when a session actually starts.
 - The eval harness runs end to end and produces a gated report.
 - **The backend is deployed and responding.** `tofu apply` created the project,
   Firestore in Montreal with delete protection and point-in-time recovery,
@@ -498,11 +498,12 @@ packages/shared/src
 packages/web/src
   voice/session.ts       the orchestrator: cascade, barge-in, instrumentation
   voice/vad.ts           Silero VAD, echo-cancelled capture
-  voice/stt-whisper.ts   Whisper via transformers.js (WebGPU → WASM)
-  voice/llm-webllm.ts    on-device LLM via WebLLM
+  voice/pipeline-worker.ts main-thread handle to the three on-device stages
+  voice/inference.worker.ts Whisper, the interviewer model and Kokoro, off-thread
+  voice/model-manifest.ts stage declarations — repo, modules, dtype per device
+  voice/models.ts        the model catalogue the router chooses from
+  voice/local-models.ts  loading a folder of models already on disk
   voice/llm-cloud.ts     SSE client for the cloud route
-  voice/tts-kokoro.ts    Kokoro neural voice
-  voice/tts-webspeech.ts platform voice fallback
   state/, components/    React layer
 
 packages/functions/src

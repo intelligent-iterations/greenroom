@@ -22,6 +22,7 @@ interface Args {
   record: boolean;
   writeBaseline: boolean;
   tag?: string;
+  limit?: number;
   concurrency: number;
 }
 
@@ -41,6 +42,7 @@ function parseArgs(argv: string[]): Args {
     record: argv.includes('--record'),
     writeBaseline: argv.includes('--write-baseline'),
     ...(get('tag') ? { tag: get('tag')! } : {}),
+    ...(get('limit') ? { limit: Number(get('limit')) } : {}),
     concurrency: Number(get('concurrency') ?? 4),
   };
 }
@@ -82,6 +84,10 @@ async function main(): Promise<void> {
   let cases = await loadCases(DATASETS);
   if (args.tag) cases = cases.filter((c) => c.tags.includes(args.tag!));
   if (cases.length === 0) throw new Error(args.tag ? `No cases tagged "${args.tag}"` : 'No cases found');
+  // Applied after tag filtering so `--tag=x --limit=2` means the first two of
+  // that tag. Exists for the local backend, where CPU decoding makes the full
+  // suite slow enough that people stop running it.
+  if (args.limit !== undefined) cases = cases.slice(0, args.limit);
 
   const recorded = new Map(
     cases.filter((c) => c.referenceTurn).map((c) => [c.id, c.referenceTurn!]),

@@ -118,9 +118,9 @@ missing one.
 
 ## Bundle strategy
 
-Every heavy adapter is behind a dynamic import. Statically, transformers.js +
-WebLLM + Kokoro is ~9 MB of JavaScript downloaded before the setup screen can
-render a button. Deferring them to the moment a session starts takes the initial
+Every heavy adapter is behind a dynamic import. Statically, transformers.js,
+the ONNX runtime and Kokoro are ~9 MB of JavaScript downloaded before the setup
+screen can render a button. Deferring them to the moment a session starts takes the initial
 chunk to ~819 KB, and the cloud path never pays for the on-device runtimes it
 does not use.
 

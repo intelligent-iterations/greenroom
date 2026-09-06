@@ -111,6 +111,30 @@ describe('not_repeating', () => {
     const turn = 'What decision on that team turned out to be wrong?';
     expect(result(turn, 'not_repeating', { previousInterviewerTurns: asked })).toBeUndefined();
   });
+
+  // The adversarial derail case exists to reward exactly this turn. A check
+  // that failed it would fail the build for the interviewer doing its job.
+  it('allows re-asking a question the candidate dodged', () => {
+    const turn = 'Another time, gladly. Walk me through a system you owned from design to production.';
+    const dodge = 'Before that, what is your favourite programming language? I could talk about it all day.';
+    expect(
+      result(turn, 'not_repeating', {
+        previousInterviewerTurns: asked,
+        lastCandidateAnswer: dodge,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('still fails a repeat of a question the candidate did answer', () => {
+    const turn = 'Walk me through a system you owned from design into production.';
+    const answer = 'I owned the billing system end to end, from the design docs through production rollout.';
+    expect(
+      result(turn, 'not_repeating', {
+        previousInterviewerTurns: asked,
+        lastCandidateAnswer: answer,
+      })?.passed,
+    ).toBe(false);
+  });
 });
 
 describe('a clean interviewer turn still passes everything', () => {

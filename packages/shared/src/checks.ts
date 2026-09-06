@@ -186,6 +186,13 @@ function overlap(a: string, b: string): number {
 const ECHO_THRESHOLD = 0.7;
 /** Above this, a turn is asking something already asked. */
 const REPEAT_THRESHOLD = 0.8;
+/**
+ * Below this overlap with a question, an answer did not engage with it.
+ *
+ * Deliberately low. The cost of setting it too high is failing a build for
+ * re-asking a dodged question, which is the interviewer doing its job.
+ */
+const ENGAGEMENT_FLOOR = 0.2;
 
 export function runChecks(
   turn: string,
@@ -245,12 +252,23 @@ export function runChecks(
 
   for (const previous of context.previousInterviewerTurns ?? []) {
     const repeat = overlap(text, previous);
-    if (repeat >= REPEAT_THRESHOLD) {
-      results.push(
-        check('not_repeating', false, `repeats an earlier question (${repeat.toFixed(2)} overlap)`),
-      );
-      break;
+    if (repeat < REPEAT_THRESHOLD) continue;
+    // Re-asking a question the candidate dodged is correct interviewing, not a
+    // repeat. Only a question they actually engaged with is one worth flagging,
+    // so the candidate's last answer decides: if it barely touches the earlier
+    // question, they never answered it and the interviewer is right to return.
+    // Without this the check fires hardest on exactly the behaviour the
+    // adversarial derail case exists to reward.
+    if (
+      context.lastCandidateAnswer !== undefined &&
+      overlap(context.lastCandidateAnswer, previous) < ENGAGEMENT_FLOOR
+    ) {
+      continue;
     }
+    results.push(
+      check('not_repeating', false, `repeats an earlier question (${repeat.toFixed(2)} overlap)`),
+    );
+    break;
   }
 
   const leaks = LEAKAGE.filter((p) => p.test(text));
