@@ -40,6 +40,13 @@ interface AppStore {
   presetId: string;
   /** System prompt for the 'custom' preset. */
   customPrompt: string;
+  /**
+   * A CV or job description the learner pasted, for grounding.
+   *
+   * Held here and on the learner state, never sent to the server — see
+   * saveLearnerState and firestore.rules.
+   */
+  groundingText: string;
 
   setPhase: (phase: Phase) => void;
   setScenario: (id: string) => void;
@@ -50,6 +57,7 @@ interface AppStore {
   setLocalModel: (files: [string, File][] | undefined, label?: string) => void;
   setPresetId: (id: string) => void;
   setCustomPrompt: (prompt: string) => void;
+  setGroundingText: (text: string) => void;
   setSessionState: (state: SessionState) => void;
   setProgress: (progress: LoadProgress) => void;
   addTurn: (turn: Turn) => void;
@@ -69,6 +77,7 @@ export const useAppStore = create<AppStore>((set) => ({
   allowCloud: false,
   presetId: 'chat',
   customPrompt: '',
+  groundingText: '',
 
   setPhase: (phase) => set({ phase }),
   setScenario: (scenarioId) => set({ scenarioId }),
@@ -79,6 +88,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setLocalModel: (localModelFiles, localModelLabel) => set({ localModelFiles, localModelLabel }),
   setPresetId: (presetId) => set({ presetId }),
   setCustomPrompt: (customPrompt) => set({ customPrompt }),
+  setGroundingText: (groundingText) => set({ groundingText }),
   setSessionState: (sessionState) => set({ sessionState }),
   setProgress: (progress) => set({ progress }),
   // The live caption is replaced by the committed turn, so it clears here

@@ -4,10 +4,13 @@ import {
   customPreset,
   interviewPreset,
   DEFAULT_POLICY,
+  LexicalRetriever,
   NON_LLM_STAGE_VRAM_MB,
+  buildCorpus,
   findScenario,
   selectModel,
   type LearnerState,
+  type Retriever,
   type RoutingDecision,
   type RoutingPolicy,
 } from '@greenroom/shared';
@@ -134,10 +137,35 @@ export function useSession() {
       // interviewer is inaudible, with nothing logged to explain why.
       await pipeline.primeAudio();
 
+      // Grounding, when the learner pasted something. Indexed here rather than
+      // in the session because the corpus comes from the scenario and the
+      // learner's own documents, and the orchestrator should know about
+      // neither. Skipped entirely when there is nothing to ground in, so the
+      // prompt compiler falls back to the scenario's own notes.
+      const documents = app.groundingText.trim()
+        ? [
+            {
+              id: 'pasted',
+              kind: 'job_description' as const,
+              title: 'Pasted document',
+              text: app.groundingText,
+              updatedAt: Date.now(),
+            },
+          ]
+        : [];
+      let retriever: Retriever | undefined;
+      const corpus = buildCorpus(scenario, documents);
+      if (corpus.length > 0) {
+        const lexical = new LexicalRetriever();
+        await lexical.index(corpus);
+        retriever = lexical;
+      }
+
       const session = new InterviewSession({
         preset,
         scenario,
         learner,
+        ...(retriever ? { retriever } : {}),
         // On-device models cannot follow the full prompt; see PromptStyle.
         promptStyle: selected.vendor === 'on-device' ? 'compact' : 'full',
         stages: {

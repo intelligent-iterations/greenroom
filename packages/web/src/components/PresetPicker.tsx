@@ -9,7 +9,8 @@ import { useAppStore } from '../state/store.js';
  * interview practice is one thing it can be used for.
  */
 export function PresetPicker({ learner }: { learner: LearnerState }) {
-  const { presetId, setPresetId, customPrompt, setCustomPrompt } = useAppStore();
+  const { presetId, setPresetId, customPrompt, setCustomPrompt, groundingText, setGroundingText } =
+    useAppStore();
 
   const options = [
     ...BUILT_IN_PRESETS.map((p) => ({ id: p.id, title: p.title, description: p.description })),
@@ -44,6 +45,29 @@ export function PresetPicker({ learner }: { learner: LearnerState }) {
           </button>
         ))}
       </div>
+
+      {presetId.startsWith('interview:') && (
+        <label className="stack">
+          <span className="muted small">
+            Optional: paste a CV or a job description. The interviewer will draw on the
+            parts relevant to whatever it is about to ask, so its questions are about
+            your actual experience rather than the role in the abstract. Retrieval runs
+            on this device and the text is never sent anywhere — not to the model
+            provider, and not to the server, which rejects it outright.
+          </span>
+          <textarea
+            className="prompt-input"
+            rows={6}
+            value={groundingText}
+            onChange={(e) => setGroundingText(e.target.value)}
+            placeholder={
+              'Senior backend engineer, six years.\n\n' +
+              'Owned the checkout service end to end. Led the migration off the Rails\n' +
+              'monolith onto Postgres and Kafka, which halved checkout latency.'
+            }
+          />
+        </label>
+      )}
 
       {presetId === 'custom' && (
         <label className="stack">
