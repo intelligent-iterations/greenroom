@@ -128,6 +128,31 @@ describe('handleGenerate gate ordering', () => {
     vi.restoreAllMocks();
   });
 
+  /**
+   * Counting turns bounds nothing on its own: the shape caps allowed 60x8000
+   * characters in one call, about 120k input tokens, so a ceiling of 500 turns
+   * a day was really a ceiling of 60M tokens a day.
+   */
+  it('rejects a request that is within the shape caps but enormous', async () => {
+    const res = resOf();
+    const huge = Array.from({ length: 60 }, () => ({ role: 'user', content: 'x'.repeat(8000) }));
+    await handleGenerate(reqOf({ ...VALID, messages: huge }), res as never, storeThat(true));
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('still accepts a realistically sized session', async () => {
+    const res = resOf();
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const real = [
+      { role: 'system', content: 'x'.repeat(2700) },
+      ...Array.from({ length: 20 }, () => ({ role: 'user', content: 'x'.repeat(600) })),
+    ];
+    await handleGenerate(reqOf({ ...VALID, messages: real }), res as never, storeThat(true));
+    // 503 = it got all the way to the provider and found no key configured.
+    expect(res.statusCode).toBe(503);
+    vi.restoreAllMocks();
+  });
+
   it('rejects an oversized token request rather than trusting the client', async () => {
     const res = resOf();
     await handleGenerate(reqOf({ ...VALID, maxTokens: 8000 }), res as never, storeThat(true));

@@ -97,7 +97,7 @@ your answers off-device.
 Other useful commands:
 
 ```bash
-pnpm test         # 309 unit tests across five packages
+pnpm test         # 311 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -357,8 +357,13 @@ mint uids for free, in a loop, which means a per-user cap on its own bounds
 nothing at all. So there are two ceilings, both counted *before* the vendor is
 touched and before the model id is even resolved, and **the global one is the
 one that actually bounds the bill**. Defaults are small on purpose (50 turns per
-uid, 500 per deployment, per UTC day): a demo that gets found and hammered should
-cost pocket money, and raising that is a conscious act with a number attached.
+uid, 500 per deployment, per UTC day), and **size is capped as well as count** —
+24,000 characters of message content per request, roughly 6,000 tokens. That
+second cap is what makes the first one mean anything in dollars: the per-message
+limits alone allowed 60 x 8,000 characters in one call, so a ceiling of 500 turns
+a day was really a ceiling of 60 million input tokens a day. Capped both ways the
+worst case is about **$0.75 a day** at Gemini 3 Flash's $0.25/M, which is the
+pocket money the ceiling was supposed to describe.
 The check fails closed — a counter that cannot be read cannot honour a ceiling,
 and an unavailable opt-in feature with an on-device alternative one click away
 beats an unbounded invoice. A GCP billing budget in `infra/` alerts at 50/90/100%
@@ -510,7 +515,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 309 unit tests across five packages, including the pipeline concurrency:
+- 311 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather

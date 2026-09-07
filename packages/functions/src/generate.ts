@@ -17,20 +17,42 @@ import { reserveTurn, type QuotaStore } from './quota.js';
  * 8000 tokens is either a bug or someone using our billing account as a free
  * LLM endpoint. Both are worth rejecting.
  */
-const GenerateBody = z.object({
-  model: z.string().min(1).max(64),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['system', 'user', 'assistant']),
-        content: z.string().max(8000),
-      }),
-    )
-    .min(1)
-    .max(60),
-  temperature: z.number().min(0).max(2).default(0.6),
-  maxTokens: z.number().int().min(1).max(1024).default(160),
-});
+/**
+ * Total characters across all messages in one request.
+ *
+ * The per-message and per-array caps below bound the *shape* of a request but
+ * not its size: sixty messages of eight thousand characters is 480,000
+ * characters, roughly 120,000 input tokens, in a single call. Multiplied by a
+ * daily ceiling counted in turns, that is a four-figure monthly bill from a
+ * quota that looks bounded.
+ *
+ * So size is capped as well as count, and the two together are what make the
+ * ceiling in quota.ts mean something in dollars. 24,000 characters is about
+ * 6,000 tokens — comfortably more than double a real session, which is a
+ * compiled prompt of roughly 2,700 characters plus a transcript that is short
+ * by construction because every spoken turn is under sixty words.
+ */
+const MAX_REQUEST_CHARS = 24_000;
+
+const GenerateBody = z
+  .object({
+    model: z.string().min(1).max(64),
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(['system', 'user', 'assistant']),
+          content: z.string().max(8000),
+        }),
+      )
+      .min(1)
+      .max(60),
+    temperature: z.number().min(0).max(2).default(0.6),
+    maxTokens: z.number().int().min(1).max(1024).default(160),
+  })
+  .refine(
+    (body) => body.messages.reduce((total, m) => total + m.content.length, 0) <= MAX_REQUEST_CHARS,
+    { message: `Total message content must be at most ${MAX_REQUEST_CHARS} characters` },
+  );
 
 /**
  * Streams model output to the browser as SSE.
