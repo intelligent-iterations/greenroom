@@ -22,6 +22,22 @@ the harness scores properties, in two layers with a strict division of labour.
 | `length` | no | turns too long to listen to (>75 words) |
 | `single_question` | no | three questions stacked into one spoken turn |
 | `no_mid_session_feedback` | no | grading the candidate before the debrief |
+| `not_echoing` | no | restating the candidate's own answer back at them |
+| `not_repeating` | no | re-asking a question they already answered |
+| `not_reciting_context` | no | reading a retrieved passage back at them verbatim |
+
+The last three need context the turn alone does not carry — the transcript so far,
+and the passages the model was handed. The harness passed none of it until
+recently, so all three were present in every report and could never fire. A check
+that cannot fail is worse than no check, because it looks like coverage: see the
+note at the top of `checks.ts`. Wiring the context in immediately turned
+`not_repeating` red on a case whose reference turn was *correct* — the candidate
+had dodged the question and the interviewer re-anchored to it — so the check now
+distinguishes re-asking a dodged question from repeating an answered one.
+
+`not_reciting_context` is the one grounding failure that is genuinely decidable,
+and the one a small model handed a passage actually exhibits. Everything else
+about grounding is judgement and belongs to the judge below.
 
 Every pattern is tuned for **precision over recall**. A false positive here
 fails a build, so a check that is merely usually right does not belong; softer
@@ -29,9 +45,32 @@ cases are left to the judge. Every check has tests proving it fires on bad input
 and stays quiet on good input — a check that can never fail is worse than no
 check, because it looks like coverage.
 
+## The recorded baseline
+
+`evals/baseline.json` holds the reference run the regression gate compares
+against. The first one:
+
+| | |
+|---|---|
+| Prompt version | `2026-09-06.2` |
+| Model under test | `openrouter:z-ai/glm-5.3-flash-20260826` |
+| Judge | the same model |
+| Cases | 21, all 21 rubric-scored, 0 errored |
+| Composite | 0.905 |
+| Weakest dimension | `grounding`, 3.5 |
+
+Two caveats worth stating plainly. **The judge and the subject are the same
+model**, which is the cheapest possible setup and the one most likely to flatter
+itself; a different judge is the first thing to change. And **the judge has never
+been calibrated against a human rater**, which is the step below that decides
+whether any of these numbers mean anything.
+
+A baseline is only written from a clean run — no errors, no critical failures.
+Baselining a failing run records a failure as the thing to avoid regressing from.
+
 ## Layer 2: the rubric judge
 
-`packages/shared/src/rubric.ts` defines eight dimensions with written anchors at
+`packages/shared/src/rubric.ts` defines nine dimensions with written anchors at
 1, 3 and 5. The anchors are the point: an unanchored 1-5 scale invites a judge
 to cluster everything near the middle, and a rubric that returns 4 for
 everything discriminates nothing. Anchoring is also what makes human calibration
@@ -48,6 +87,21 @@ mean.
 | `followup_quality` | 1.5 | |
 | `voice_form` | 1.5 | |
 | `safety` | 2 | yes |
+| `grounding` | 1 | |
+
+`grounding` is scored **only when the interviewer was actually given context**,
+and dropped from the rubric entirely otherwise. Scoring a turn on its use of
+context it never had produces a number that means nothing, and that number would
+then drag the dimension mean under `minDimensionMean` on every case with nothing
+to ground against. `compositeScore` already normalises over the dimensions
+actually present, so a grounded and an ungrounded case stay comparable on the same
+0..1 scale. The judge discards a score for any dimension it was not shown, since a
+judge scoring outside the rubric it was given is working from its own idea of it.
+
+It is not critical. A fabricated detail in a practice interview misleads; it does
+not harm the way answer leakage or a discriminatory question does, and making it
+critical would gate every build on entailment — the least reliable judgement an
+LLM judge makes.
 
 `answer_leakage` and `safety` are critical: those are the failures that make the
 product actively harmful rather than merely mediocre, and they gate

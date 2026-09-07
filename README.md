@@ -29,6 +29,7 @@ the measurement around it, so that is what this is now.
 - [Architecture](#architecture)
 - [The voice pipeline](#the-voice-pipeline)
 - [Pedagogical calibration](#pedagogical-calibration)
+- [Grounding](#grounding)
 - [Model portability](#model-portability)
 - [Evaluation harness](#evaluation-harness)
 - [Infrastructure and deployment](#infrastructure-and-deployment)
@@ -96,7 +97,7 @@ your answers off-device.
 Other useful commands:
 
 ```bash
-pnpm test         # 216 unit tests across five packages
+pnpm test         # 276 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -268,6 +269,47 @@ one deliberate exception: a competency never observed outranks one that is
 merely scoring badly. Gathering a first signal beats grinding on the thing
 already known to be weak.
 
+## Grounding
+
+The interviewer can draw on what it was actually told: the scenario's own notes,
+and a CV or job description the learner pastes in. Retrieval picks the passages
+relevant to the question being worked toward and the answer just given, and the
+prompt compiler renders them.
+
+**The retriever is lexical and runs on the device.** Not because BM25 beats
+embeddings — it does not — but because this is a claim about the *default*. The
+document being searched is somebody's CV, so shipping it to a hosted vector
+database to search forty chunks would trade the premise for an index that fits in
+memory. And the eval gate compares scored runs against a baseline, so retrieval
+has to be reproducible: floating-point embedding output is not bit-identical
+across runtimes, which would make retrieval a source of variance in the one place
+that exists to detect variance. `Retriever` is a narrow async interface so an
+all-MiniLM implementation drops in behind it later. The reasoning is in
+[ADR 0007](docs/adr/0007-lexical-retrieval-first.md).
+
+Two details that turned out to matter more than the ranking function:
+
+**A relevance floor.** A lexical retriever always returns its best match, however
+bad. Without one, a pasted restaurant menu produces a "grounding" passage and the
+interviewer asks the candidate about the soup. There is a test for exactly that.
+
+**Retrieval is upstream of compilation.** `compileInterviewerPrompt` stays a pure
+function — the orchestrator retrieves and passes passages in as data. Called
+without them it produces a byte-identical prompt to the one it produced before
+grounding existed, and a snapshot test captured at the old version holds it to
+that.
+
+The known limitation is recorded rather than papered over: lexical retrieval
+cannot connect "MySQL" to "Postgres", because they share no tokens. That is the
+gap an embedding retriever would close, and one of the adversarial cases exists
+to document it.
+
+**Where the document goes.** Nowhere. `saveLearnerState` drops the field and
+`firestore.rules` rejects a learner write that carries it, so the claim holds at
+the security boundary rather than by client politeness — and the silent-catch
+sync path means trusting the client here would have failed invisibly. The
+server-side scorer never receives it and does not need it.
+
 ## Model portability
 
 Every language model — on-device or hosted — implements one interface. A pure
@@ -319,7 +361,7 @@ mid-interview, or answering a French scenario in English. Anything decidable by
 a rule lives here. Every check has tests proving it fires — a check that can
 never fail is worse than no check.
 
-*An LLM judge* (`evals/src/judge.ts`) scores the eight-dimension rubric in
+*An LLM judge* (`evals/src/judge.ts`) scores the nine-dimension rubric in
 [`packages/shared/src/rubric.ts`](packages/shared/src/rubric.ts), which is
 reserved for genuine judgement: was the difficulty right, was that the follow-up
 the answer deserved.
@@ -333,11 +375,26 @@ than scoring zero. (Returning an empty verdict there scores the case 0, which
 looks exactly like a catastrophic quality regression and sends someone off to
 bisect a prompt that was fine. That bug existed and a test caught it.)
 
-**Test sets** are two JSONL files: core behaviour, and an adversarial set that
-is the more interesting half — a learner asking what a good answer would be, a
-prompt injection, a request to be scored mid-interview, an invitation to ask
-about family status, an off-topic derail, and a *legitimate* clarifying question
-that must not be treated as evasion.
+**Test sets** are three JSONL files. Core behaviour; a grounding set; and an
+adversarial set that is the most interesting of the three — a learner asking what
+a good answer would be, a prompt injection, a request to be scored mid-interview,
+an invitation to ask about family status, an off-topic derail, and a *legitimate*
+clarifying question that must not be treated as evasion.
+
+The grounding cases carry the document the interviewer was given, so the harness
+retrieves from the same corpus the app would. Two of them did not test what they
+claimed until a probe showed what the retriever was actually returning: the
+contradiction case retrieved nothing at all, and the injection case never
+surfaced the injection, so the model was never asked to resist anything. **An
+adversarial case that cannot reach the model is decoration**, which is the same
+lesson as the checks that could never fire, arriving by a different route.
+
+One dimension is scored conditionally. `grounding` is dropped from the rubric
+entirely when the interviewer was given no context, rather than scored — asking a
+judge how well a turn used context it never had produces a number that means
+nothing, and that number would then drag the dimension mean under its gate floor
+on every case with nothing to ground against. The judge also discards a score for
+a dimension it was not shown.
 
 **Quality gates** (`evals/src/gate.ts`) fail a build on: any critical-dimension
 failure (answer leakage, safety) regardless of the average; a composite below
@@ -354,8 +411,13 @@ commit on a paid non-deterministic judge trains people to ignore the gate.
 ```bash
 pnpm eval                                   # offline, deterministic checks
 pnpm --filter @greenroom/evals exec node --experimental-strip-types \
-  src/cli.ts --backend=azure --judge=gemini --gate
+  src/cli.ts --backend=openrouter --judge=openrouter --gate
 ```
+
+Backends: `replay` (default, no keys), `openrouter`, `azure`, `gemini`, and
+`local` for the on-device model natively. `evals/baseline.json` is the recorded
+reference the regression gate compares against — see the project-status section
+for what that run actually found.
 
 Full detail, including how to calibrate the judge against human raters, is in
 [docs/EVALUATION.md](docs/EVALUATION.md).
@@ -423,7 +485,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 216 unit tests across five packages, including the pipeline concurrency:
+- 276 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
@@ -450,6 +512,22 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
   `Cross-Origin-Embedder-Policy: credentialless` present in production, matching
   the dev server.
 
+- **The evaluation harness has scored a live model.** 21 cases, all 21
+  rubric-scored by an LLM judge, no errors and no critical failures, composite
+  **0.905** at prompt version `2026-09-06.2` against GLM 5.3 Flash. The run is
+  committed as `evals/baseline.json`, so the regression gate now has something to
+  compare against. It found three things a hand-authored suite could not: an
+  intermittent empty turn caused by a reasoning model sharing `max_tokens`
+  between deliberation and answer, a recall gap in a critical check that matched
+  "tell me about" but not "tell me what you built", and a reproducible slip into
+  assistant register ("Thanks for sharing that") that the prompt never actually
+  forbade. All three are fixed.
+- **Grounding is the weakest dimension, at 3.5 of 5** — the lowest of the nine
+  and exactly on its own gate floor. The interviewer is handed retrieved context
+  and often asks the question it would have asked without it. That is a real
+  finding rather than a rounding error, and it is the one the harness existed to
+  produce.
+
 **Not verified — be appropriately sceptical:**
 
 - **The loop has never run against a real microphone.** Every measurement uses
@@ -467,20 +545,24 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
   measurement to run; no measured run is committed.
 - **The `referenceTurn` values in the eval datasets are hand-authored
   exemplars, not captured model output.** They exist so the harness and gates
-  can be run and reviewed offline with no vendor account. `--record` against a
-  live backend replaces them, and only then does the suite catch model
-  regressions rather than just prompt and check regressions.
+  can be run and reviewed offline with no vendor account, and they are
+  deliberately still exemplars: replay serves a stored turn, so replaying
+  recorded output cannot catch a model regression however realistic the turns
+  are — it is deterministic by construction. The committed baseline is what
+  detects a model regression, and a live run is what exercises it.
 - **No full session has been run against the live backend.** The endpoints
   answer correctly, but nobody has signed in anonymously, completed an
   interview, written a session document and watched `onSessionCreated` fold the
   scores into their mastery estimates. The scoring trigger also needs
   `AZURE_OPENAI_*` or `GOOGLE_API_KEY` configured before it does anything but
   log that it skipped.
-- **No live evaluation run.** The gate has only ever run offline against
-  hand-authored reference turns. No baseline exists, and the judge has not been
-  calibrated against human raters — the procedure for that is written up in
-  docs/EVALUATION.md precisely because it is the step that decides whether any
-  of these numbers mean anything.
+- **The judge has not been calibrated against human raters.** One live run
+  exists and a baseline is committed, but a judge nobody has checked against a
+  person is an opinion with a number attached. The procedure is written up in
+  [docs/EVALUATION.md](docs/EVALUATION.md) precisely because it is the step that
+  decides whether these numbers mean anything. Worth knowing too: this run used
+  the same model as judge and as subject, which is the cheapest possible setup
+  and the one most likely to flatter itself.
 - VAD thresholds and the barge-in guard window are reasoned starting points that
   want tuning against recorded learner audio.
 
@@ -490,6 +572,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 packages/shared/src
   domain.ts       learner state, competencies, sessions, mastery updates
   prompt.ts       the prompt compiler — the pedagogical layer
+  retrieval.ts    corpus assembly and the lexical retriever
   rubric.ts       eight scoring dimensions with anchors, and the judge prompt
   pipeline.ts     stage interfaces, latency budget, sentence chunking
   routing.ts      model descriptors and the routing policy function
@@ -515,7 +598,8 @@ evals
   src/checks.ts   deterministic checks
   src/judge.ts    LLM judge with verified evidence quotes
   src/gate.ts     quality gates
-  datasets/       core and adversarial test sets
+  datasets/       core, adversarial and grounding test sets
+  baseline.json   the recorded reference run the regression gate compares against
 ```
 
 ## Licence
