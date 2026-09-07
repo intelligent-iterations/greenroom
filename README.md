@@ -97,7 +97,7 @@ your answers off-device.
 Other useful commands:
 
 ```bash
-pnpm test         # 311 unit tests across five packages
+pnpm test         # 314 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -350,7 +350,32 @@ never reach the client, swapping vendors is a server deploy rather than an app
 release, and every cloud inference writes one audit line saying where it went.
 That log is the artefact a residency review actually asks for.
 
-**Spend is bounded there too, and the reasoning is worth stating.** Anonymous
+### Three deployment postures
+
+The cloud route exists in the source, and whether it is *switched on* is a
+property of a deployment rather than of the code. There are three sensible
+answers and they are not the same answer:
+
+| Posture | Cloud route | Whose bill |
+|---|---|---|
+| **Public demo / open-source default** | **Off** | Nobody's — there is nothing to spend |
+| Self-hosted | On, if the operator wants it | The operator's own key |
+| Portal / enterprise | On, through the proxy, with the audit log | The operator's, per contract |
+
+The default is off, and that is a real switch rather than an absence. Enabling it
+takes `CLOUD_INFERENCE_ENABLED=true` on the server *and* `VITE_CLOUD_ENABLED=true`
+in the build — two deliberate acts, on both sides, neither trusted to be the only
+one. **A vendor key being present is explicitly not consent**: a key can arrive in
+an environment for a dozen innocent reasons and none of them should quietly turn a
+public endpoint into a billable LLM API. There is a test that puts a real-looking
+key in the environment and asserts the endpoint still refuses.
+
+This is also why the setup screen no longer offers a cloud toggle it cannot
+honour. It previously offered one unconditionally, so on a deployment with no key
+a visitor could opt in, start a session and receive a 503 — an option that looked
+like a feature and behaved like a bug.
+
+**When the route is on, spend is bounded, and the reasoning is worth stating.** Anonymous
 auth is deliberate — the product does not require an identity to practise — so a
 Firebase ID token proves a browser loaded the page and nothing more. Anyone can
 mint uids for free, in a loop, which means a per-user cap on its own bounds
@@ -515,7 +540,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 311 unit tests across five packages, including the pipeline concurrency:
+- 314 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather

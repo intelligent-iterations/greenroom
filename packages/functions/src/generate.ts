@@ -61,6 +61,23 @@ const GenerateBody = z
  * lived, and SSE survives the proxies in front of a corporate portal that
  * routinely break WebSocket upgrades.
  */
+/**
+ * Whether this deployment serves cloud inference at all.
+ *
+ * A key being present is NOT consent. The two are separated deliberately: a
+ * vendor key can arrive in an environment for a dozen reasons — a shared
+ * secret store, a copied config, someone testing the scoring trigger — and none
+ * of them should quietly turn a public endpoint into a billable LLM API. So
+ * enabling costs two deliberate acts rather than one accidental one.
+ *
+ * Off by default, which is the right posture for the public demo and for anyone
+ * who clones this: the on-device path is the product, and a self-hoster who
+ * wants the cloud route sets their own key and owns their own bill.
+ */
+export function cloudInferenceEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CLOUD_INFERENCE_ENABLED === 'true';
+}
+
 export async function handleGenerate(
   req: Request,
   res: Response,
@@ -70,6 +87,14 @@ export async function handleGenerate(
 ): Promise<void> {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  // Checked before authentication, so a disabled deployment does not even do
+  // token-verification work on request. The posture is public information —
+  // the README states it — so there is nothing to withhold here.
+  if (!cloudInferenceEnabled()) {
+    res.status(503).json({ error: 'Cloud inference is disabled on this deployment' });
     return;
   }
 

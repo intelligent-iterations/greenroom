@@ -71,6 +71,9 @@ function storeThat(allow: boolean): QuotaStore & { consulted: number } {
 }
 
 beforeEach(() => {
+  // Every test below runs with the deployment enabled unless it says otherwise;
+  // the disabled case is the default posture and is asserted separately.
+  process.env.CLOUD_INFERENCE_ENABLED = 'true';
   delete process.env.GOOGLE_API_KEY;
   delete process.env.AZURE_OPENAI_ENDPOINT;
   delete process.env.AZURE_OPENAI_API_KEY;
@@ -157,5 +160,46 @@ describe('handleGenerate gate ordering', () => {
     const res = resOf();
     await handleGenerate(reqOf({ ...VALID, maxTokens: 8000 }), res as never, storeThat(true));
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('deployment posture', () => {
+  /**
+   * The property that makes the public demo safe by design rather than by
+   * nobody having set a key yet. A key can arrive in an environment for a dozen
+   * innocent reasons; none of them should turn a public endpoint into a
+   * billable LLM API.
+   */
+  it('is disabled by default, even with a vendor key present', async () => {
+    delete process.env.CLOUD_INFERENCE_ENABLED;
+    process.env.GOOGLE_API_KEY = 'a-real-looking-key';
+    const res = resOf();
+    const store = storeThat(true);
+
+    await handleGenerate(reqOf(VALID), res as never, store);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ error: expect.stringContaining('disabled') });
+    // Nothing was spent and nothing was counted.
+    expect(store.consulted).toBe(0);
+    delete process.env.GOOGLE_API_KEY;
+  });
+
+  it('treats anything other than the exact opt-in string as off', async () => {
+    for (const value of ['1', 'yes', 'TRUE', '']) {
+      process.env.CLOUD_INFERENCE_ENABLED = value;
+      const res = resOf();
+      await handleGenerate(reqOf(VALID), res as never, storeThat(true));
+      expect(res.statusCode).toBe(503);
+    }
+  });
+
+  // Refused before a token is even verified, so a disabled deployment does no
+  // work on request.
+  it('refuses without verifying the caller', async () => {
+    delete process.env.CLOUD_INFERENCE_ENABLED;
+    const res = resOf();
+    await handleGenerate(reqOf(VALID, false), res as never, storeThat(true));
+    expect(res.statusCode).toBe(503);
   });
 });

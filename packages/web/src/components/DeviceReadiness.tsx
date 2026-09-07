@@ -1,5 +1,6 @@
 import { NON_LLM_STAGE_VRAM_MB } from '@greenroom/shared';
 import { useAppStore } from '../state/store.js';
+import { cloudInferenceOffered } from '../data/deployment.js';
 import type { useSession } from '../state/useSession.js';
 import { MODEL_CATALOGUE } from '../voice/models.js';
 
@@ -101,17 +102,25 @@ export function DeviceReadiness({ session }: { session: ReturnType<typeof useSes
         })}
       </fieldset>
 
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={allowCloud}
-          onChange={(e) => setAllowCloud(e.target.checked)}
-        />
-        <span>
-          Allow cloud inference for a stronger interviewer
-          <span className="muted small"> — needed if this device has no WebGPU</span>
-        </span>
-      </label>
+      {cloudInferenceOffered() ? (
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={allowCloud}
+            onChange={(e) => setAllowCloud(e.target.checked)}
+          />
+          <span>
+            Allow cloud inference for a stronger interviewer
+            <span className="muted small"> — needed if this device has no WebGPU</span>
+          </span>
+        </label>
+      ) : (
+        <p className="muted small">
+          This deployment runs on-device only. Nothing you say and nothing you type leaves
+          this machine. The cloud adapters ship in the source for anyone self-hosting who
+          wants them, with their own key.
+        </p>
+      )}
 
       {(routing?.rejected.length ?? 0) > 0 && (
         <details className="diagnostics">
