@@ -159,15 +159,16 @@ export class GeminiBackend implements EvalBackend {
  * Extra tokens granted on top of the caller's turn budget, for models that
  * think before answering.
  *
- * Sized from measured runs rather than guessed: GLM 5.3 Flash at
- * `effort: 'minimal'` usually spends ~50 tokens, but a French opening turn
- * took 712, so `minimal` is a hint and not a cap. Generous on purpose — the
- * headroom is only ever spent by models that need it, at a fraction of a cent,
- * and the failure it prevents is an empty turn that reads as a quality
- * collapse. A model that exhausts even this errors by name rather than
- * returning nothing.
+ * Generous because generosity is free: `max_tokens` is a ceiling, not a spend,
+ * so a budget the model does not use costs nothing. The measured behaviour it
+ * has to cover is spiky rather than large — GLM 5.3 Flash at `effort:
+ * 'minimal'` spends no reasoning tokens at all on most turns and occasionally
+ * over two thousand on the very same prompt, so `minimal` is a hint, not a cap,
+ * and a tight budget fails intermittently. An intermittent empty turn is worse
+ * than a consistent one: it reads as a flaky model rather than a misconfigured
+ * request.
  */
-const REASONING_HEADROOM_TOKENS = 512;
+const REASONING_HEADROOM_TOKENS = 2048;
 
 /**
  * How many times to re-ask when reasoning ate the whole budget.

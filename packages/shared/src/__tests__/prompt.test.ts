@@ -81,21 +81,21 @@ describe('compileInterviewerPrompt', () => {
 });
 
 /**
- * The compiled output as it stood before retrieval existed.
+ * The compiled prompt, pinned.
  *
- * Retrieval is an additive change to a versioned pure function that a CI gate
- * baselines against, so the claim "a call with no passages is byte-identical to
- * before" has to be a test rather than an assurance. These strings were
- * captured at PROMPT_VERSION 2026-09-05.5 and must not be regenerated from the
- * implementation — that would make the test agree with whatever the code does.
+ * Started life proving that adding retrieval left the no-passages path
+ * byte-identical. It stays as a general guard: this is a versioned pure
+ * function that a CI gate baselines against, so every change to what the model
+ * is told should be visible in a review diff rather than inferred from a moved
+ * score. Update deliberately, alongside a PROMPT_VERSION bump.
  */
-describe('the no-passages path is unchanged', () => {
-  it('compiles the full prompt exactly as it did before retrieval', () => {
+describe('the compiled prompt is pinned', () => {
+  it('compiles the full prompt', () => {
     const compiled = compileInterviewerPrompt({ scenario, learner });
     expect(compiled.system).toMatchSnapshot();
   });
 
-  it('compiles the compact prompt exactly as it did before retrieval', () => {
+  it('compiles the compact prompt', () => {
     const compiled = compileInterviewerPrompt({ scenario, learner, style: 'compact' });
     expect(compiled.system).toMatchSnapshot();
   });

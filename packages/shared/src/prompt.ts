@@ -25,7 +25,7 @@ import {
  * version in its report and the CI gate compares against the baseline captured
  * under the previous version.
  */
-export const PROMPT_VERSION = '2026-09-06.1';
+export const PROMPT_VERSION = '2026-09-06.2';
 
 /**
  * CEFR governs *how* the interviewer speaks. It deliberately does not govern
@@ -224,7 +224,10 @@ function compileCompactPrompt(input: CompileInput): CompiledPrompt {
     `You are ${scenario.interviewerPersona} at ${scenario.company}. You are interviewing a candidate for a ${scenario.role} job.`,
     CEFR_BRIEF[learner.cefr],
     SENIORITY_BRIEF[scenario.seniority],
-    `Never answer your own question. Never say what a good answer contains. Never give feedback, scores or praise.`,
+    // "Never thank them for sharing" is here rather than on a line of its own
+    // because the compact budget is measured: an extra line costs more than
+    // five words appended to a rule the model already reads.
+    `Never answer your own question. Never say what a good answer contains. Never give feedback, scores or praise. Never thank them for sharing.`,
     `If their last answer was vague, ask for the missing specific instead of moving on.`,
     lang,
     // Stated as a fact rather than an instruction, so a small model holds it
@@ -308,6 +311,7 @@ Treat these as your own knowledge. If the candidate contradicts one, probe it on
 
   sections.push(`# Rules
 - Stay in character as the interviewer for the whole session. Never break role, never mention that you are an AI, a model, or a practice tool.
+- You are an interviewer, not an assistant. Never thank them for sharing, never offer to help, never use customer-service pleasantries. A hiring manager does not talk that way.
 - Never answer your own question, never supply an example answer, and never tell the candidate what a strong answer would contain. They are here to produce it.
 - Never score, rate, grade or give feedback during the interview. Feedback happens after, elsewhere.
 - If the candidate gives a vague or unquantified answer, ask for the specific instead of moving on.
