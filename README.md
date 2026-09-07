@@ -97,7 +97,7 @@ your answers off-device.
 Other useful commands:
 
 ```bash
-pnpm test         # 276 unit tests across five packages
+pnpm test         # 289 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -147,6 +147,16 @@ rather than a native realtime API. The reasoning is in
 [ADR 0002](docs/adr/0002-cascaded-vs-realtime.md); the short version is that no
 realtime voice API runs on-device, so choosing one would mean giving up the
 premise.
+
+The duplex seam exists anyway, in `duplex.ts` and `realtime-session.ts` — a
+parallel orchestrator rather than an extension of the cascade, because ADR 0002
+predicted that realtime would replace the orchestrator rather than reconfigure
+it, and pretending one abstraction covered both would be the worse lie. Building
+it produced the strongest argument in that ADR, which reasoning about it had not:
+**a duplex session sets its prompt once at socket open and cannot recompile per
+turn**, so per-turn coverage steering and all of the retrieved grounding below
+are lost in the switch. It has never talked to a vendor; see the project-status
+section.
 
 A cascade is easy to build badly. Two things make it feel live rather than like
 a walkie-talkie:
@@ -485,7 +495,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 276 unit tests across five packages, including the pipeline concurrency:
+- 289 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
@@ -530,6 +540,17 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Not verified — be appropriately sceptical:**
 
+- **The duplex realtime path has never talked to a vendor.**
+  `packages/shared/src/duplex.ts` defines the interface a realtime API would
+  implement, and `realtime-session.ts` orchestrates against it — synthesising the
+  `Turn[]` and `TurnTimings` the debrief and the mastery scorer require, leaving
+  `sttMs` undefined because a duplex stream has no recognition boundary to
+  measure, disabling the local VAD when the vendor handles barge-in itself, and
+  refusing to start against a vendor that emits no assistant transcript. All of
+  it has run only against a scripted fake in unit tests. There is no adapter for
+  Gemini Live, Azure Realtime or OpenAI Realtime, no duplex credential exists
+  here, and no audio has ever crossed that seam. It is a design verified as a
+  design; treat any claim about realtime latency or barge-in quality as unmade.
 - **The loop has never run against a real microphone.** Every measurement uses
   pre-recorded utterances. VAD initialisation is verified against a synthetic
   stream (`vadcheck.html`), but endpointing quality, echo cancellation and
@@ -587,6 +608,7 @@ packages/web/src
   voice/models.ts        the model catalogue the router chooses from
   voice/local-models.ts  loading a folder of models already on disk
   voice/llm-cloud.ts     SSE client for the cloud route
+  voice/realtime-session.ts the duplex orchestrator — no vendor adapter yet
   state/, components/    React layer
 
 packages/functions/src

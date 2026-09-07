@@ -31,7 +31,7 @@ export type SessionState =
   | 'ended'
   | 'error';
 
-interface SessionEvents extends Record<string, (...args: never[]) => void> {
+export interface SessionEvents extends Record<string, (...args: never[]) => void> {
   state: (state: SessionState) => void;
   /** Streaming text for the live caption. Cumulative for the current turn. */
   interviewerDelta: (text: string) => void;
@@ -92,7 +92,7 @@ export interface SessionConfig {
  * literal in the handler so it can be tuned against real devices, which is
  * where AEC behaviour actually varies.
  */
-const BARGE_IN_GUARD_MS = 400;
+export const BARGE_IN_GUARD_MS = 400;
 
 /**
  * Orchestrates one spoken interview.

@@ -10,13 +10,13 @@ on:
       backend:
         description: Model under test
         type: choice
-        options: [azure, gemini]
-        default: azure
+        options: [openrouter, azure, gemini]
+        default: openrouter
       judge:
         description: Judge model
         type: choice
-        options: [gemini, azure]
-        default: gemini
+        options: [openrouter, gemini, azure]
+        default: openrouter
       write_baseline:
         description: Record this run as the new baseline
         type: boolean
@@ -43,6 +43,8 @@ jobs:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
           # Through env rather than inline: an input interpolated into a shell
           # line is script, and this job holds vendor API keys.
           BACKEND: ${{ inputs.backend }}

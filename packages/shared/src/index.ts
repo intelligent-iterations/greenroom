@@ -1,6 +1,7 @@
 export * from './domain.js';
 export * from './presets.js';
 export * from './prompt.js';
+export * from './duplex.js';
 export * from './pipeline.js';
 export * from './routing.js';
 export * from './checks.js';

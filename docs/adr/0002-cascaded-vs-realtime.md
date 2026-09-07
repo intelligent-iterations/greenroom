@@ -66,3 +66,41 @@ stage interfaces in `pipeline.ts` do **not** help — realtime collapses all thr
 into one — and the orchestrator would be replaced rather than reconfigured. That
 is understood and accepted; pretending the abstraction covers realtime would be
 a worse lie than not having it.
+
+---
+
+## Amended 2026-09-06
+
+**The decision stands.** Cascaded, on-device, is still the default and nothing
+about what ships has changed.
+
+**What was built.** `packages/shared/src/duplex.ts` defines `DuplexVoiceStage`,
+and `packages/web/src/voice/realtime-session.ts` orchestrates against it. This
+*carries out* the prediction above rather than contradicting it: the orchestrator
+is replaced, not reconfigured. `pipeline.ts`, `SessionStages` and `routing.ts` are
+untouched, and the list of files this did not have to change is the most useful
+thing about it.
+
+**What was not built, and why.** There is no adapter for Gemini Live, Azure
+Realtime or OpenAI Realtime. No duplex credential exists for this project, so an
+adapter could be written but never run, and a vendor integration nobody has run
+is not a vendor integration. The seam has never carried a byte from a vendor.
+
+**One claim in this ADR now has a mechanism.** The argument above that realtime
+APIs produce transcripts "as a lower-quality side channel, when they produce it at
+all" was an assertion. `DuplexCapabilities.assistantTranscripts` makes it a
+precondition: `RealtimeSession` refuses to start without it, naming the debrief
+and the mastery score as the reason, rather than running and producing a
+transcript that is not evidence of anything.
+
+**A new consequence, found by building the seam rather than by reasoning about
+it.** A duplex session sets its system prompt once, at socket open, and cannot
+recompile per turn. So per-turn coverage steering (`nextQuestion`) and the whole
+of the retrieved grounding in ADR 0007 do not survive the switch. That is an
+argument for the cascade that this ADR did not originally have, and it is the
+strongest one in it.
+
+**Revisit when** — as above, or when a duplex credential becomes available. At
+that point the first thing to write is a vendor adapter and a live first-audio
+comparison anchored on the same `speechEndedAt` the cascade uses, so the two
+architectures land in one latency table. Not more interface.
