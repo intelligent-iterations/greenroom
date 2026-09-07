@@ -128,13 +128,14 @@ pnpm eval:gate    # the same run, as a pass/fail quality gate
                   Firestore (learner state, transcripts)
 ```
 
-Four packages, one shared vocabulary:
+Five packages, one shared vocabulary:
 
 | Package | What it is |
 |---|---|
-| `packages/shared` | Domain model, prompt compiler, rubric, routing policy. Imported by all three other packages **and by the eval harness**. |
+| `packages/shared` | Domain model, prompt compiler, rubric, retrieval, routing policy. Imported by every other package **and by the eval harness**. |
 | `packages/web` | React app and the voice pipeline. |
 | `packages/functions` | Firebase Cloud Functions: the cloud-inference proxy and server-side scoring. |
+| `packages/rules` | Firestore security rules, under test against the emulator. |
 | `evals` | Evaluation harness, test sets, quality gates. |
 
 Firebase is entirely optional. With no config the app runs local-only: bundled
@@ -194,7 +195,7 @@ There are now two layers, both deterministic and neither needing a GPU:
   URL is fully determined by the manifest. The tests pin the mapping, including
   that `q8` becomes `_quantized` rather than `_q8`.
 - **`pnpm preflight`.** Resolves the manifest to concrete URLs and HEAD-checks
-  all fifteen in a few seconds.
+  all twenty-five in a few seconds.
 
 Preflight has already earned it: it found that `onnx-community/silero-vad` ships
 no `config.json`, which is why the loader is handed one inline.
@@ -504,7 +505,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 - Every package typechecks under TypeScript strict mode with
   `noUncheckedIndexedAccess`.
 - The web app builds. Lazy-loading the model adapters took the initial bundle
-  from 9.5 MB to 819 KB; transformers.js, the ONNX runtime and Kokoro load
+  from 9.5 MB to 862 KB; transformers.js, the ONNX runtime and Kokoro load
   only when a session actually starts.
 - The eval harness runs end to end and produces a gated report.
 - **The backend is deployed and responding.** `tofu apply` created the project,
@@ -594,7 +595,7 @@ packages/shared/src
   domain.ts       learner state, competencies, sessions, mastery updates
   prompt.ts       the prompt compiler — the pedagogical layer
   retrieval.ts    corpus assembly and the lexical retriever
-  rubric.ts       eight scoring dimensions with anchors, and the judge prompt
+  rubric.ts       nine scoring dimensions with anchors, and the judge prompt
   pipeline.ts     stage interfaces, latency budget, sentence chunking
   routing.ts      model descriptors and the routing policy function
   scenarios.ts    the content the app, the scorer and the harness all share

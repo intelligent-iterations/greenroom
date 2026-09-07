@@ -190,6 +190,11 @@ completed runs.
 
 ### What it measured immediately
 
+Measured when the suite held fifteen cases, before the grounding set was added.
+The numbers are left as they were recorded rather than rescaled to the current
+twenty-one — a measurement that quietly follows the suite around is not a
+measurement.
+
 SmolLM2 360M — the weakest tier — across all fifteen cases:
 
 | Prompt | Passing |
