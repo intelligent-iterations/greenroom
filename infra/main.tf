@@ -152,3 +152,38 @@ data "google_firebase_web_app_config" "greenroom" {
   project    = google_project.greenroom.project_id
   web_app_id = google_firebase_web_app.greenroom.app_id
 }
+
+# A budget with alerts at 50/90/100% of the monthly ceiling.
+#
+# Deliberately belt and braces. The application quota in
+# packages/functions/src/quota.ts bounds calls before they reach a vendor, and
+# that is the control that should ever actually bind. This exists for the case
+# that control is wrong — a bug, a bad env override, a path that forgets to
+# check — because the failure mode there is financial and silent, and a bill is
+# a bad way to find out.
+#
+# Note this ALERTS, it does not cap: Google has no hard spend cutoff, and a
+# budget that silently stopped serving would be its own kind of outage. The
+# hard ceiling is the one in the function.
+resource "google_billing_budget" "greenroom" {
+  billing_account = var.billing_account
+  display_name    = "${var.project_name} monthly ceiling"
+
+  budget_filter {
+    projects = ["projects/${google_project.greenroom.number}"]
+  }
+
+  amount {
+    specified_amount {
+      currency_code = "USD"
+      units         = tostring(var.monthly_budget_usd)
+    }
+  }
+
+  dynamic "threshold_rules" {
+    for_each = [0.5, 0.9, 1.0]
+    content {
+      threshold_percent = threshold_rules.value
+    }
+  }
+}

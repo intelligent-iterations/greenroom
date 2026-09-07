@@ -1,3 +1,4 @@
+import { getFirestore } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { findProvider } from './providers/index.js';
 import { ProviderError } from './providers/types.js';
@@ -6,6 +7,7 @@ import type { Request } from 'firebase-functions/https';
 // us `flushHeaders` and the raw `write` that SSE needs.
 import type { Response } from 'express';
 import { verifyRequest } from './auth.js';
+import { reserveTurn, type QuotaStore } from './quota.js';
 
 /**
  * Body schema.
@@ -37,7 +39,13 @@ const GenerateBody = z.object({
  * lived, and SSE survives the proxies in front of a corporate portal that
  * routinely break WebSocket upgrades.
  */
-export async function handleGenerate(req: Request, res: Response): Promise<void> {
+export async function handleGenerate(
+  req: Request,
+  res: Response,
+  // Injected so the endpoint's ordering can be tested without Firestore. The
+  // ordering is the security property: auth, then quota, then vendor.
+  store: QuotaStore = getFirestore() as unknown as QuotaStore,
+): Promise<void> {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -52,6 +60,17 @@ export async function handleGenerate(req: Request, res: Response): Promise<void>
   const parsed = GenerateBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', detail: parsed.error.issues });
+    return;
+  }
+
+  // Counted before the vendor is touched, and before the provider is even
+  // resolved, so a caller cannot spend anything by probing model ids. Anonymous
+  // uids are free to mint, so the global ceiling inside is the one doing the
+  // real work — see quota.ts.
+  const quota = await reserveTurn(store, user.uid);
+  if (!quota.allowed) {
+    console.warn(JSON.stringify({ event: 'quota_denied', uid: user.uid, scope: quota.scope }));
+    res.status(429).json({ error: quota.reason });
     return;
   }
 

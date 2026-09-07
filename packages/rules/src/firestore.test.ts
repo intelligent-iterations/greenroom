@@ -270,6 +270,21 @@ describe('learner documents never reach the server', () => {
   });
 });
 
+describe('spend counters are server-only', () => {
+  // quota/ is written by the generate function with Admin credentials, which
+  // bypass these rules. A client that could read it would learn the remaining
+  // budget; a client that could write it would set its own.
+  it('refuses a client read of the quota counters', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(getDoc(doc(db, 'quota', 'global-2026-09-07')));
+  });
+
+  it('refuses a client write of the quota counters', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(setDoc(doc(db, 'quota', `user-${ALICE}-2026-09-07`), { count: 0 }));
+  });
+});
+
 describe('everything else is closed', () => {
   it('refuses reads and writes outside the learner tree', async () => {
     // The catch-all deny. Without it, a future collection is open by default.

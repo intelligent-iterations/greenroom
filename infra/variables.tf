@@ -42,3 +42,9 @@ variable "location" {
   type        = string
   default     = "northamerica-northeast1"
 }
+
+variable "monthly_budget_usd" {
+  description = "Monthly spend ceiling for alerting. The last line of defence: the application-level quota in packages/functions/src/quota.ts is the one that should ever fire, and this is what catches the case where that code is wrong."
+  type        = number
+  default     = 25
+}
