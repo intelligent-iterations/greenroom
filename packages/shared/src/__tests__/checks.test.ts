@@ -80,6 +80,11 @@ describe('asks_a_question: imperative asks with a wh-word', () => {
     expect(result(turn, 'asks_a_question')?.passed).toBe(true);
   });
 
+  it('accepts "start me from wherever you would begin"', () => {
+    const turn = "Let's say North America. Start me from wherever you'd begin.";
+    expect(result(turn, 'asks_a_question')?.passed).toBe(true);
+  });
+
   it('still fails a turn that only makes a statement', () => {
     expect(result('That is a good place to leave it.', 'asks_a_question')?.passed).toBe(false);
   });

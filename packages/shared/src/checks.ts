@@ -99,6 +99,10 @@ const IMPERATIVE_ASK = [
   /\bexplain\b/i,
   /\bgive me an example\b/i,
   /\bstep me through\b/i,
+  // Same construction as "step me through", found the same way: on a live turn
+  // ("Start me from wherever you'd begin") that handed the floor over as
+  // clearly as any question mark would have.
+  /\bstart me (?:from|at|with|wherever)\b/i,
   // French, for the bilingual scenarios. Omitting these failed a correct
   // French opening turn, which is how they came to be here.
   /\b(?:parlez|dites|racontez)-moi\b/i,

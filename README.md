@@ -97,7 +97,7 @@ your answers off-device.
 Other useful commands:
 
 ```bash
-pnpm test         # 289 unit tests across five packages
+pnpm test         # 290 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -496,7 +496,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 289 unit tests across five packages, including the pipeline concurrency:
+- 290 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
@@ -533,6 +533,24 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
   "tell me about" but not "tell me what you built", and a reproducible slip into
   assistant register ("Thanks for sharing that") that the prompt never actually
   forbade. All three are fixed.
+- **The regression gate has run against the baseline.** A later run scored
+  `composite +0.009 against baseline 0.905` — the comparison working, not a
+  claim that it would.
+- **That run also failed the gate, and the failures are the point.** At
+  temperature 0.6 this model intermittently slips into assistant register
+  ("feel free to ask questions too"), opens with a long self-introduction
+  instead of a question, and answers a clarifying question without clearly
+  handing the floor back. None of that is fixed by a prompt line — the prompt
+  already forbids the first — so it stands as a vendor result: **GLM 5.3 Flash
+  is not reliably in-register for this product without mitigation.** That is
+  the kind of answer a benchmarking harness exists to produce, and it only
+  exists because the gate is allowed to fail.
+- **The two scoring layers caught different halves of one failure**, which is
+  the clearest evidence the split is real rather than tidy. Handed the team's
+  context, the model recited it back at the candidate in paraphrase. The
+  deterministic `not_reciting_context` check correctly stayed quiet — the text
+  was reworded, not copied — and the judge scored `grounding` 2 and quoted the
+  offending sentence. A rule catches verbatim; judgement catches paraphrase.
 - **Grounding is the weakest dimension, at 3.5 of 5** — the lowest of the nine
   and exactly on its own gate floor. The interviewer is handed retrieved context
   and often asks the question it would have asked without it. That is a real
