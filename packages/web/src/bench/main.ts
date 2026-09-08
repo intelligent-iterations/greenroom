@@ -15,13 +15,15 @@
  * driver can read them without scraping text.
  */
 import {
-  compileInterviewerPrompt,
   splitSpeakableChunks,
   type ChatMessage,
+} from '@greenroom/shared';
+import {
+  compileInterviewerPrompt,
   type InterviewScenario,
   type LearnerState,
   findScenario,
-} from '@greenroom/shared';
+} from '@greenroom/shared/interview';
 import { detectCapabilities } from '../voice/capabilities.js';
 import { MODEL_CATALOGUE } from '../voice/models.js';
 import { InferencePipeline } from '../voice/pipeline-worker.js';

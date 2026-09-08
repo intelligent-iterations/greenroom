@@ -1,4 +1,4 @@
-import type { InterviewScenario, LearnerState } from '../domain.js';
+import type { InterviewScenario, LearnerState } from '../interview/domain.js';
 
 export const scenario: InterviewScenario = {
   id: 'be-mid-payments',

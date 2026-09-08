@@ -7,7 +7,11 @@
  * real compiled prompt through the real model and prints the raw token stream
  * with nothing applied, so the two cases can be told apart.
  */
-import { compileInterviewerPrompt, findScenario, type LearnerState } from '@greenroom/shared';
+import {
+  compileInterviewerPrompt,
+  findScenario,
+  type LearnerState,
+} from '@greenroom/shared/interview';
 import { AutoModelForCausalLM, AutoTokenizer, TextStreamer } from '@huggingface/transformers';
 import { findStage } from '../voice/model-manifest.js';
 

@@ -1,7 +1,4 @@
 import { z } from 'zod';
-import { compileInterviewerPrompt, type PromptStyle } from './prompt.js';
-import { SCENARIOS } from './scenarios.js';
-import type { InterviewLanguage, LearnerState } from './domain.js';
 
 /**
  * A conversational partner the voice loop can run.
@@ -127,40 +124,6 @@ export const BUILT_IN_PRESETS: VoicePreset[] = [
   ),
 ];
 
-/**
- * The interview preset, built from the pedagogical prompt compiler.
- *
- * Kept as a preset rather than a special case so the playground and the
- * training tool run the identical loop. The compiler still owns CEFR register,
- * seniority calibration and focus selection.
- */
-export function interviewPreset(
-  scenarioId: string,
-  learner: LearnerState,
-  style: PromptStyle = 'compact',
-): VoicePreset | undefined {
-  const scenario = SCENARIOS.find((s) => s.id === scenarioId);
-  if (!scenario) return undefined;
-
-  const compiled = compileInterviewerPrompt({
-    scenario,
-    learner,
-    style,
-    ...(scenario.requiredQuestions[0] ? { nextQuestion: scenario.requiredQuestions[0] } : {}),
-  });
-
-  return VoicePreset.parse({
-    id: `interview:${scenario.id}`,
-    title: scenario.title,
-    description: `Practice interview — ${scenario.company}`,
-    language: scenario.language satisfies InterviewLanguage,
-    systemPrompt: compiled.system,
-    openingMessage: "I'm ready to begin.",
-    maxTurns: scenario.maxTurns,
-    scenarioId: scenario.id,
-  });
-}
-
 /** A preset from a system prompt the user wrote. */
 export function customPreset(systemPrompt: string, language: 'en' | 'fr' = 'en'): VoicePreset {
   return VoicePreset.parse({
@@ -171,11 +134,4 @@ export function customPreset(systemPrompt: string, language: 'en' | 'fr' = 'en')
     systemPrompt: systemPrompt.trim() || 'You are a helpful spoken conversation partner.',
     editable: true,
   });
-}
-
-export function allPresets(learner: LearnerState): VoicePreset[] {
-  const interviews = SCENARIOS.map((s) => interviewPreset(s.id, learner)).filter(
-    (p): p is VoicePreset => p !== undefined,
-  );
-  return [...BUILT_IN_PRESETS, ...interviews];
 }

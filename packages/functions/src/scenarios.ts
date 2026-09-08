@@ -6,4 +6,4 @@
  * and it can only do that correctly if it sees byte-identical content to what
  * the browser ran.
  */
-export { SCENARIOS, findScenario } from '@greenroom/shared';
+export { SCENARIOS, findScenario } from '@greenroom/shared/interview';

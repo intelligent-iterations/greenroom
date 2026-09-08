@@ -2,18 +2,20 @@ import { ensureUser } from '../data/firebase.js';
 import {
   BUILT_IN_PRESETS,
   customPreset,
-  interviewPreset,
   DEFAULT_POLICY,
   LexicalRetriever,
   NON_LLM_STAGE_VRAM_MB,
   buildCorpus,
-  findScenario,
   selectModel,
-  type LearnerState,
   type Retriever,
   type RoutingDecision,
   type RoutingPolicy,
 } from '@greenroom/shared';
+import {
+  interviewPreset,
+  findScenario,
+  type LearnerState,
+} from '@greenroom/shared/interview';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { detectCapabilities, type DeviceCapabilities } from '../voice/capabilities.js';
 import { MODEL_CATALOGUE } from '../voice/models.js';

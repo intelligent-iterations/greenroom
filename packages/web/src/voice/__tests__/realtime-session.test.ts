@@ -1,4 +1,10 @@
-import type { DuplexCapabilities, InterviewScenario, LearnerState } from '@greenroom/shared';
+import type {
+  DuplexCapabilities,
+} from '@greenroom/shared';
+import type {
+  InterviewScenario,
+  LearnerState,
+} from '@greenroom/shared/interview';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RealtimeSession } from '../realtime-session.js';
 import { BARGE_IN_GUARD_MS } from '../session.js';

@@ -12,8 +12,19 @@ division of labour: rules that are decidable, and judgement that is not.
 
 Reference implementation in this repository: the runner and case loader in
 `evals/src/runner.ts`, the judge in `evals/src/judge.ts`, the gates in
-`evals/src/gate.ts`, the anchored rubric in `packages/shared/src/rubric.ts`, and
-worked cases in `evals/datasets/interviewer-adversarial.jsonl`.
+`evals/src/gate.ts`, the anchored rubric in `packages/shared/src/rubric.ts`.
+
+**A case carries its own agent.** Give it a `systemPrompt` and the harness needs
+to know nothing about what your agent is for; naming one of the bundled
+scenarios is only sugar for the example that ships here. See
+`evals/datasets/support-agent.jsonl` for a phone support agent — not an
+interview — scored by the same harness.
+
+**Say which packs apply.** `checkPacks` and `rubricPacks` on a case select what
+gets scored, and getting this wrong is not cosmetic: a support agent answering a
+caller's question fails a *critical* check under the interview packs for not
+asking a question back. Default is everything, which is right for the bundled
+example and wrong for most agents.
 
 ## Cases are situations, not expected answers
 

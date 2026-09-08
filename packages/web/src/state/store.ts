@@ -1,4 +1,11 @@
-import type { LearnerState, LoadProgress, Turn, TurnTimings } from '@greenroom/shared';
+import type {
+  LoadProgress,
+  Turn,
+  TurnTimings,
+} from '@greenroom/shared';
+import type {
+  LearnerState,
+} from '@greenroom/shared/interview';
 import { create } from 'zustand';
 import type { SessionState } from '../voice/session.js';
 

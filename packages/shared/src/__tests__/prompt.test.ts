@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileInterviewerPrompt, selectFocusCompetencies } from '../prompt.js';
+import { compileInterviewerPrompt, selectFocusCompetencies } from '../interview/prompt.js';
 import type { RetrievedPassage } from '../retrieval.js';
 import { learner, scenario } from './fixtures.js';
 

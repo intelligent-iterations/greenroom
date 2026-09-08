@@ -108,7 +108,7 @@ constraint rather than a proxy for one.
 Other useful commands:
 
 ```bash
-pnpm test         # 336 unit tests across five packages
+pnpm test         # 357 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -139,11 +139,17 @@ pnpm eval:gate    # the same run, as a pass/fail quality gate
                   Firestore (learner state, transcripts)
 ```
 
-Five packages, one shared vocabulary:
+Five packages, split along one boundary that matters more than the others: the
+**core** is everything true of any spoken agent, and interview coaching is one
+**worked example** behind its own entry point. Someone evaluating a support bot
+should never have to see a CEFR level to use the harness, and a test asserts
+they do not — `packages/shared/src/__tests__/boundary.test.ts` fails if a single
+interview symbol leaks back into `@greenroom/shared`.
 
 | Package | What it is |
 |---|---|
-| `packages/shared` | Domain model, prompt compiler, rubric, retrieval, routing policy. Imported by every other package **and by the eval harness**. |
+| `packages/shared` | **The core.** Checks, rubric, judge prompt, retrieval, pipeline interfaces, routing policy — everything true of any spoken agent. |
+| `packages/shared/interview` | **The worked example.** CEFR, seniority, competencies, mastery, and the interviewer prompt compiler. A separate entry point, not re-exported by the core. |
 | `packages/web` | React app and the voice pipeline. |
 | `packages/functions` | Firebase Cloud Functions: the cloud-inference proxy and server-side scoring. |
 | `packages/rules` | Firestore security rules, under test against the emulator. |
@@ -577,7 +583,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 336 unit tests across five packages, including the pipeline concurrency:
+- 357 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather

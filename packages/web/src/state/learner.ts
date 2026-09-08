@@ -1,9 +1,11 @@
 import {
+  type SessionRecord,
+} from '@greenroom/shared';
+import {
   LearnerState,
   updateMastery,
   type CompetencyId,
-  type SessionRecord,
-} from '@greenroom/shared';
+} from '@greenroom/shared/interview';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { ensureUser, getBackend } from '../data/firebase.js';
 

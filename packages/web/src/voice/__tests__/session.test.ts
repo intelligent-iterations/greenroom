@@ -1,5 +1,19 @@
-import type { InterviewScenario, LearnerState, Retriever, VoicePreset } from '@greenroom/shared';
-import { LexicalRetriever, buildCorpus, customPreset, interviewPreset } from '@greenroom/shared';
+import type {
+  Retriever,
+  VoicePreset,
+} from '@greenroom/shared';
+import type {
+  InterviewScenario,
+  LearnerState,
+} from '@greenroom/shared/interview';
+import {
+  LexicalRetriever,
+  buildCorpus,
+  customPreset,
+} from '@greenroom/shared';
+import {
+  interviewPreset,
+} from '@greenroom/shared/interview';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InterviewSession, type SessionState } from '../session.js';
 import { FakeRecognizer, FakeSynthesizer, FakeVad, ScriptedModel, flush } from './fakes.js';

@@ -3,7 +3,13 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { onDocumentCreated } from 'firebase-functions/firestore';
 import { onRequest } from 'firebase-functions/https';
 import { setGlobalOptions } from 'firebase-functions';
-import { LearnerState, SessionRecord, compileInterviewerPrompt } from '@greenroom/shared';
+import {
+  SessionRecord,
+} from '@greenroom/shared';
+import {
+  LearnerState,
+  compileInterviewerPrompt,
+} from '@greenroom/shared/interview';
 import { handleGenerate } from './generate.js';
 import { foldScores, scoreSession } from './scoring.js';
 import { findScenario } from './scenarios.js';

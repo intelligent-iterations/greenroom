@@ -1,4 +1,7 @@
-import { type CefrLevel, type LearnerState } from '@greenroom/shared';
+import {
+  type CefrLevel,
+  type LearnerState,
+} from '@greenroom/shared/interview';
 import { useState } from 'react';
 import { useAppStore } from '../state/store.js';
 import type { useSession } from '../state/useSession.js';

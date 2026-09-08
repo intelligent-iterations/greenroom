@@ -1,4 +1,10 @@
-import { BUILT_IN_PRESETS, SCENARIOS, type LearnerState } from '@greenroom/shared';
+import {
+  BUILT_IN_PRESETS,
+} from '@greenroom/shared';
+import {
+  SCENARIOS,
+  type LearnerState,
+} from '@greenroom/shared/interview';
 import { useAppStore } from '../state/store.js';
 
 /**

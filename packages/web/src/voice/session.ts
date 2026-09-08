@@ -1,22 +1,24 @@
 import {
-  compileCoachPrompt,
-  compileInterviewerPrompt,
   splitSpeakableChunks,
   type ChatMessage,
-  type CompiledPrompt,
-  type InterviewScenario,
   type LanguageModel,
-  type LearnerState,
   type LoadProgress,
   type SpeechRecognizer,
   type SpeechSynthesizer,
-  type PromptStyle,
   type RetrievedPassage,
   type Retriever,
   type Turn,
   type TurnTimings,
   type VoicePreset,
 } from '@greenroom/shared';
+import {
+  compileCoachPrompt,
+  compileInterviewerPrompt,
+  type CompiledPrompt,
+  type InterviewScenario,
+  type LearnerState,
+  type PromptStyle,
+} from '@greenroom/shared/interview';
 import { logEvent } from './diagnostics.js';
 import { Emitter } from './emitter.js';
 import type { VadController } from './vad.types.js';

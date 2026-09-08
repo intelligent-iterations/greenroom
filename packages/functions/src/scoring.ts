@@ -1,4 +1,7 @@
 import {
+  type Turn,
+} from '@greenroom/shared';
+import {
   CompetencyId,
   compileAnswerScoringPrompt,
   updateMastery,
@@ -6,8 +9,7 @@ import {
   type InterviewScenario,
   type LearnerState,
   type ObservedError,
-  type Turn,
-} from '@greenroom/shared';
+} from '@greenroom/shared/interview';
 import { z } from 'zod';
 import { defaultScoringProvider } from './providers/index.js';
 

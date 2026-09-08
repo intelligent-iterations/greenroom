@@ -1,4 +1,4 @@
-import type { RetrievedPassage } from './retrieval.js';
+import type { RetrievedPassage } from '../retrieval.js';
 import {
   COMPETENCY_LABELS,
   MIN_CONFIDENT_OBSERVATIONS,

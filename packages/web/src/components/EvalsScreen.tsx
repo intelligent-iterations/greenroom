@@ -4,10 +4,12 @@ import {
   parseTranscript,
   resultsToCsv,
   runChecks,
-  SCENARIOS,
   type EvalCsvResultRow,
   type EvalCsvRow,
 } from '@greenroom/shared';
+import {
+  SCENARIOS,
+} from '@greenroom/shared/interview';
 import { useRef, useState } from 'react';
 import { useAppStore } from '../state/store.js';
 

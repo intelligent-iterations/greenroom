@@ -2,12 +2,14 @@ import type {
   DuplexAudioChunk,
   DuplexEvent,
   DuplexVoiceStage,
-  InterviewScenario,
-  LearnerState,
   Turn,
   TurnTimings,
   VoicePreset,
 } from '@greenroom/shared';
+import type {
+  InterviewScenario,
+  LearnerState,
+} from '@greenroom/shared/interview';
 import { logEvent } from './diagnostics.js';
 import { Emitter } from './emitter.js';
 import { BARGE_IN_GUARD_MS, type SessionEvents, type SessionState } from './session.js';

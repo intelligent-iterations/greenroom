@@ -24,13 +24,15 @@
  */
 const STORAGE_KEY = 'greenroom.evals.last';
 import {
-  compileInterviewerPrompt,
-  findScenario,
   runChecks,
   type CheckResult,
+} from '@greenroom/shared';
+import {
+  compileInterviewerPrompt,
+  findScenario,
   type LearnerState,
   type PromptStyle,
-} from '@greenroom/shared';
+} from '@greenroom/shared/interview';
 import { InferencePipeline } from '../voice/pipeline-worker.js';
 
 interface Case {

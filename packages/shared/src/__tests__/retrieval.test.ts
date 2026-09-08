@@ -7,7 +7,18 @@ import {
   type CorpusEntry,
 } from '../retrieval.js';
 import { SourceDocument } from '../domain.js';
-import { scenario as en } from './fixtures.js';
+/**
+ * A plain object, deliberately not the interview fixture. buildCorpus takes
+ * anything with an id and some notes, and a test that reached for a scenario
+ * would quietly re-couple retrieval to a domain it has no business knowing.
+ */
+const en = {
+  id: 'be-mid-payments',
+  contextNotes: [
+    'The team runs Postgres and is midway through leaving a Rails monolith.',
+    'On-call is shared and the team is protective of its incident load.',
+  ],
+};
 
 function doc(text: string, id = 'cv-1'): SourceDocument {
   return SourceDocument.parse({ id, kind: 'cv', title: 'CV', text, updatedAt: 0 });

@@ -1,4 +1,7 @@
-import { COMPETENCY_LABELS, type LearnerState } from '@greenroom/shared';
+import {
+  COMPETENCY_LABELS,
+  type LearnerState,
+} from '@greenroom/shared/interview';
 import { useEffect, useState } from 'react';
 import { median, percentile, useAppStore } from '../state/store.js';
 import type { useSession } from '../state/useSession.js';

@@ -1,4 +1,6 @@
-import type { LearnerState } from '@greenroom/shared';
+import type {
+  LearnerState,
+} from '@greenroom/shared/interview';
 import { describe, expect, it } from 'vitest';
 import { extractJson, foldScores, type AnswerScores } from '../scoring.js';
 
