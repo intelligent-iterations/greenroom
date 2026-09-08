@@ -35,7 +35,7 @@ function verdict(evidence: string, scores = 4): string {
 }
 
 const input = {
-  interviewerSystemPrompt: 'system',
+  agentSystemPrompt: 'system',
   transcript: 'Candidate: it was a lot faster',
   turnUnderTest: TURN,
 };

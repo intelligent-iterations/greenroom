@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COACHING_RUBRIC,
+  LANGUAGE_LEARNING_RUBRIC,
   RUBRIC,
+  SPOKEN_RUBRIC,
   applicableRubric,
   buildJudgePrompt,
   compositeScore,
@@ -55,7 +58,7 @@ describe('criticalFailures', () => {
 describe('buildJudgePrompt', () => {
   it('includes the interviewer prompt, the turn, and every applicable dimension', () => {
     const p = buildJudgePrompt({
-      interviewerSystemPrompt: 'SYSTEM_MARKER',
+      agentSystemPrompt: 'SYSTEM_MARKER',
       transcript: 'Interviewer: hi',
       turnUnderTest: 'TURN_MARKER',
       passages: ['The team runs Postgres.'],
@@ -70,7 +73,7 @@ describe('buildJudgePrompt', () => {
   // floor on every case that has nothing to ground against.
   it('drops the grounding dimension when the interviewer was given no context', () => {
     const p = buildJudgePrompt({
-      interviewerSystemPrompt: 'x',
+      agentSystemPrompt: 'x',
       transcript: '',
       turnUnderTest: 't',
     });
@@ -80,7 +83,7 @@ describe('buildJudgePrompt', () => {
 
   it('shows the judge the context the interviewer had', () => {
     const p = buildJudgePrompt({
-      interviewerSystemPrompt: 'x',
+      agentSystemPrompt: 'x',
       transcript: '',
       turnUnderTest: 't',
       passages: ['They owned the payments service.'],
@@ -90,7 +93,7 @@ describe('buildJudgePrompt', () => {
   });
 
   it('labels the opening turn when there is no transcript', () => {
-    expect(buildJudgePrompt({ interviewerSystemPrompt: 'x', transcript: '', turnUnderTest: 't' })).toContain(
+    expect(buildJudgePrompt({ agentSystemPrompt: 'x', transcript: '', turnUnderTest: 't' })).toContain(
       'this is the opening turn',
     );
   });
@@ -114,5 +117,52 @@ describe('applicableRubric', () => {
       ids.map((id) => ({ dimension: id as DimensionScore['dimension'], score: 5, evidence: 'q' }));
     expect(compositeScore(perfectOf(applicableRubric([]).map((d) => d.id)))).toBeCloseTo(1);
     expect(compositeScore(perfectOf(applicableRubric(['f']).map((d) => d.id)))).toBeCloseTo(1);
+  });
+});
+
+describe('composable rubric packs', () => {
+  it('covers every dimension exactly once between the packs', () => {
+    const composed = [...SPOKEN_RUBRIC, ...COACHING_RUBRIC, ...LANGUAGE_LEARNING_RUBRIC];
+    expect(composed.map((d) => d.id).sort()).toEqual(RUBRIC.map((d) => d.id).sort());
+    expect(new Set(composed.map((d) => d.id)).size).toBe(composed.length);
+  });
+
+  // The spoken pack has to stand alone: it is what someone evaluating a support
+  // bot or a booking assistant will use, and none of those are being coached.
+  it('leaves the spoken pack free of coaching assumptions', () => {
+    const ids = SPOKEN_RUBRIC.map((d) => d.id);
+    expect(ids).not.toContain('answer_leakage');
+    expect(ids).not.toContain('difficulty_calibration');
+    expect(ids).not.toContain('coverage_progress');
+  });
+
+  it('keeps a critical dimension in the pack that needs it', () => {
+    expect(SPOKEN_RUBRIC.find((d) => d.id === 'safety')?.critical).toBe(true);
+    expect(COACHING_RUBRIC.find((d) => d.id === 'answer_leakage')?.critical).toBe(true);
+  });
+
+  it('scores a composed rubric on its own scale', () => {
+    const perfectOf = (dims: typeof RUBRIC): DimensionScore[] =>
+      dims.map((d) => ({ dimension: d.id, score: 5, evidence: 'q' }));
+    expect(compositeScore(perfectOf(SPOKEN_RUBRIC))).toBeCloseTo(1);
+    expect(compositeScore(perfectOf(RUBRIC))).toBeCloseTo(1);
+  });
+
+  it('narrows a composed rubric when there is nothing to ground in', () => {
+    const narrowed = applicableRubric([], SPOKEN_RUBRIC).map((d) => d.id);
+    expect(narrowed).not.toContain('grounding');
+    expect(narrowed).toContain('role_fidelity');
+  });
+
+  it('builds a judge prompt for a composed rubric and no others', () => {
+    const prompt = buildJudgePrompt({
+      agentSystemPrompt: 'x',
+      transcript: '',
+      turnUnderTest: 't',
+      rubric: SPOKEN_RUBRIC,
+      passages: ['a fact'],
+    });
+    expect(prompt).toContain('role_fidelity');
+    expect(prompt).not.toContain('difficulty_calibration');
   });
 });

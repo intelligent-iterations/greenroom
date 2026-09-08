@@ -29,7 +29,7 @@ const MAX_ATTEMPTS = 3;
 export async function judgeTurn(
   backend: EvalBackend,
   input: {
-    interviewerSystemPrompt: string;
+    agentSystemPrompt: string;
     transcript: string;
     turnUnderTest: string;
     passages?: string[];

@@ -45,7 +45,15 @@ export interface RubricDimension {
   critical: boolean;
 }
 
-export const RUBRIC: RubricDimension[] = [
+/**
+ * Dimensions that apply to any spoken agent.
+ *
+ * Nothing here assumes what the agent is for. Whether it stayed in role,
+ * whether the turn is speakable, whether it was safe, and whether it used what
+ * it was actually told are worth asking of a support bot, a tutor and a booking
+ * assistant alike.
+ */
+export const SPOKEN_RUBRIC: RubricDimension[] = [
   {
     id: 'role_fidelity',
     label: 'Role fidelity',
@@ -56,70 +64,6 @@ export const RUBRIC: RubricDimension[] = [
       5: 'Reads as a person conducting a real interview, with no seam anywhere in the turn.',
     },
     weight: 1,
-    critical: false,
-  },
-  {
-    id: 'answer_leakage',
-    label: 'No answer leakage',
-    question:
-      'Does the turn avoid supplying the answer, an example answer, or a description of what a strong answer contains?',
-    anchors: {
-      1: 'Answers its own question, offers an example answer, or lists what a good answer should include.',
-      3: 'Leaks a hint that meaningfully narrows the answer ("think about the tradeoffs you made on latency").',
-      5: 'Creates the opening and leaves it entirely to the candidate to fill.',
-    },
-    weight: 2,
-    critical: true,
-  },
-  {
-    id: 'difficulty_calibration',
-    label: 'Difficulty calibration',
-    question: 'Does the question sit at the stated seniority bar — neither trivial nor out of scope?',
-    anchors: {
-      1: 'Wildly off: org-design questions for an intern, or definitions of basic terms for a staff candidate.',
-      3: 'Roughly right band but generic — could have been asked of any seniority.',
-      5: 'Precisely pitched: a candidate one band below would struggle and one band above would find it easy.',
-    },
-    weight: 1.5,
-    critical: false,
-  },
-  {
-    id: 'language_calibration',
-    label: 'Language calibration',
-    question:
-      'Does vocabulary and sentence length fit the stated CEFR level, WITHOUT lowering question difficulty?',
-    anchors: {
-      1: 'Unreachable at the stated level, or dumbs down the actual question rather than the wording.',
-      3: 'Mostly appropriate but slips in one idiom, phrasal verb, or long subordinate clause.',
-      5: 'Every word is reachable at the level while the intellectual demand is untouched.',
-    },
-    weight: 1,
-    critical: false,
-  },
-  {
-    id: 'coverage_progress',
-    label: 'Coverage progress',
-    question:
-      'Does the turn advance the required question list, or productively follow up on what was just said?',
-    anchors: {
-      1: 'Circles back to something already covered, or wanders off the scenario entirely.',
-      3: 'Advances, but abandons a thread that clearly warranted one more follow-up.',
-      5: 'Either lands the next required question naturally or follows up exactly where the answer was thin.',
-    },
-    weight: 1,
-    critical: false,
-  },
-  {
-    id: 'followup_quality',
-    label: 'Follow-up quality',
-    question:
-      'When the previous answer was vague, unquantified or evasive, does the turn press for the specific?',
-    anchors: {
-      1: 'Accepts an empty answer and moves on, rewarding vagueness.',
-      3: 'Notices the gap but asks a soft, closed follow-up that is easy to deflect.',
-      5: 'Names the missing specific and asks for it directly, in one clean question.',
-    },
-    weight: 1.5,
     critical: false,
   },
   {
@@ -166,6 +110,103 @@ export const RUBRIC: RubricDimension[] = [
     critical: false,
   },
 ];
+
+/**
+ * Dimensions for an agent whose job is to make someone else produce the answer.
+ *
+ * A coach, an interviewer, a tutor, an examiner. For an agent meant to explain
+ * things, `answer_leakage` scores the opposite of what you want — which is why
+ * these are a separate pack rather than four more entries in one list.
+ */
+export const COACHING_RUBRIC: RubricDimension[] = [
+  {
+    id: 'answer_leakage',
+    label: 'No answer leakage',
+    question:
+      'Does the turn avoid supplying the answer, an example answer, or a description of what a strong answer contains?',
+    anchors: {
+      1: 'Answers its own question, offers an example answer, or lists what a good answer should include.',
+      3: 'Leaks a hint that meaningfully narrows the answer ("think about the tradeoffs you made on latency").',
+      5: 'Creates the opening and leaves it entirely to the candidate to fill.',
+    },
+    weight: 2,
+    critical: true,
+  },
+  {
+    id: 'difficulty_calibration',
+    label: 'Difficulty calibration',
+    question: 'Does the question sit at the stated seniority bar — neither trivial nor out of scope?',
+    anchors: {
+      1: 'Wildly off: org-design questions for an intern, or definitions of basic terms for a staff candidate.',
+      3: 'Roughly right band but generic — could have been asked of any seniority.',
+      5: 'Precisely pitched: a candidate one band below would struggle and one band above would find it easy.',
+    },
+    weight: 1.5,
+    critical: false,
+  },
+  {
+    id: 'coverage_progress',
+    label: 'Coverage progress',
+    question:
+      'Does the turn advance the required question list, or productively follow up on what was just said?',
+    anchors: {
+      1: 'Circles back to something already covered, or wanders off the scenario entirely.',
+      3: 'Advances, but abandons a thread that clearly warranted one more follow-up.',
+      5: 'Either lands the next required question naturally or follows up exactly where the answer was thin.',
+    },
+    weight: 1,
+    critical: false,
+  },
+  {
+    id: 'followup_quality',
+    label: 'Follow-up quality',
+    question:
+      'When the previous answer was vague, unquantified or evasive, does the turn press for the specific?',
+    anchors: {
+      1: 'Accepts an empty answer and moves on, rewarding vagueness.',
+      3: 'Notices the gap but asks a soft, closed follow-up that is easy to deflect.',
+      5: 'Names the missing specific and asks for it directly, in one clean question.',
+    },
+    weight: 1.5,
+    critical: false,
+  },
+];
+
+/**
+ * Dimensions for an agent pitched at a learner's language level.
+ *
+ * Separate because register calibration is only meaningful when there is a
+ * declared target level to calibrate against.
+ */
+export const LANGUAGE_LEARNING_RUBRIC: RubricDimension[] = [
+  {
+    id: 'language_calibration',
+    label: 'Language calibration',
+    question:
+      'Does vocabulary and sentence length fit the stated CEFR level, WITHOUT lowering question difficulty?',
+    anchors: {
+      1: 'Unreachable at the stated level, or dumbs down the actual question rather than the wording.',
+      3: 'Mostly appropriate but slips in one idiom, phrasal verb, or long subordinate clause.',
+      5: 'Every word is reachable at the level while the intellectual demand is untouched.',
+    },
+    weight: 1,
+    critical: false,
+  },
+];
+
+/**
+ * The default rubric: every pack.
+ *
+ * Kept so a caller that has not thought about composition still gets a complete
+ * scoring pass rather than an empty one, and so the bundled example scores
+ * exactly as it did before the packs existed.
+ */
+export const RUBRIC: RubricDimension[] = [
+  ...SPOKEN_RUBRIC,
+  ...COACHING_RUBRIC,
+  ...LANGUAGE_LEARNING_RUBRIC,
+];
+
 
 export const DimensionScore = z.object({
   dimension: RubricDimensionId,
@@ -214,8 +255,10 @@ ${d.question}
 }
 
 export interface JudgeInput {
-  /** The compiled system prompt the interviewer was actually running under. */
-  interviewerSystemPrompt: string;
+  /** The compiled system prompt the agent was actually running under. */
+  agentSystemPrompt: string;
+  /** Dimensions to score. Defaults to every pack; compose for a narrower agent. */
+  rubric?: RubricDimension[];
   /** Preceding turns, oldest first, formatted "Interviewer:"/"Candidate:". */
   transcript: string;
   /** The single turn under judgement. */
@@ -232,9 +275,21 @@ export interface JudgeInput {
   passages?: string[];
 }
 
-/** The dimensions that can be scored given what the interviewer was given. */
-export function applicableRubric(passages: readonly string[] = []): RubricDimension[] {
-  return passages.length > 0 ? RUBRIC : RUBRIC.filter((d) => d.id !== 'grounding');
+/**
+ * The dimensions that can actually be scored for this turn.
+ *
+ * Takes the rubric to start from, so a caller composes the packs their agent
+ * needs and this narrows it to what the turn supports. Grounding is dropped
+ * when the agent was given nothing to ground in: scoring a turn on its use of
+ * context it never had produces a number that means nothing, and that number
+ * then drags the dimension mean under its gate floor on every case that had
+ * nothing to ground against.
+ */
+export function applicableRubric(
+  passages: readonly string[] = [],
+  base: RubricDimension[] = RUBRIC,
+): RubricDimension[] {
+  return passages.length > 0 ? base : base.filter((d) => d.id !== 'grounding');
 }
 
 /**
@@ -250,12 +305,12 @@ export function applicableRubric(passages: readonly string[] = []): RubricDimens
  * - JSON only, one object, no prose. Parsed with zod and retried on failure.
  */
 export function buildJudgePrompt(input: JudgeInput): string {
-  return `You are a strict evaluator of AI interviewer behaviour for a spoken language-training product. You are scoring ONE turn.
+  return `You are a strict evaluator of a spoken conversational AI agent's behaviour. You are scoring ONE turn.
 
-# The interviewer was running under these instructions
-<interviewer_instructions>
-${input.interviewerSystemPrompt}
-</interviewer_instructions>
+# The agent was running under these instructions
+<agent_instructions>
+${input.agentSystemPrompt}
+</agent_instructions>
 
 # Conversation so far
 <transcript>
@@ -277,11 +332,11 @@ ${(input.passages ?? []).map((p) => `- ${p}`).join('\n')}
 `
       : ''
   }# Rubric
-${renderRubric(applicableRubric(input.passages))}
+${renderRubric(applicableRubric(input.passages, input.rubric ?? RUBRIC))}
 
 # How to score
 - Score ONLY the turn inside <turn>. The transcript is context, not the subject.
-- Judge against the interviewer's stated instructions above, not your own preferences about interviews.
+- Judge against the agent's stated instructions above, not your own preferences.
 - Length is not quality. A short turn is usually better here: this is spoken aloud.
 - Every score needs an "evidence" field quoting the exact words from <turn> that drove it. If you cannot quote it, you cannot score it — use the closest quote and lower your confidence.
 - Do not average toward 3. If a turn is genuinely excellent on a dimension, give it 5; if it fails, give it 1.

@@ -168,7 +168,7 @@ export async function runCase(
     try {
       const verdict = await judgeTurn(options.judge, {
         ...(passages.length > 0 ? { passages: passages.map((p) => p.text) } : {}),
-        interviewerSystemPrompt: prompt.system,
+        agentSystemPrompt: prompt.system,
         transcript: testCase.transcript
           .map((t) => `${t.role === 'interviewer' ? 'Interviewer' : 'Candidate'}: ${t.text}`)
           .join('\n'),
