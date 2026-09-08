@@ -559,3 +559,29 @@ progress {
   font-size: 0.85rem;
   padding-left: 0.8rem;
 }
+
+/* Readiness notice. Degraded is advisory, blocked is a dead end with a way out. */
+.notice {
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 1rem 0;
+  border-left: 3px solid;
+}
+.notice p {
+  margin: 0.4rem 0 0;
+}
+.notice ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+.notice li {
+  margin: 0.25rem 0;
+}
+.notice--degraded {
+  border-color: #b8860b;
+  background: color-mix(in srgb, #b8860b 8%, transparent);
+}
+.notice--blocked {
+  border-color: #b04a4a;
+  background: color-mix(in srgb, #b04a4a 8%, transparent);
+}

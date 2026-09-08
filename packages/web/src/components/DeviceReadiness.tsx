@@ -1,6 +1,7 @@
 import { NON_LLM_STAGE_VRAM_MB } from '@greenroom/shared';
 import { useAppStore } from '../state/store.js';
 import { cloudInferenceOffered } from '../data/deployment.js';
+import { assessReadiness } from '../voice/readiness.js';
 import type { useSession } from '../state/useSession.js';
 import { MODEL_CATALOGUE } from '../voice/models.js';
 
@@ -18,6 +19,8 @@ export function DeviceReadiness({ session }: { session: ReturnType<typeof useSes
   const { allowCloud, setAllowCloud, modelId, setModelId } = useAppStore();
 
   if (!capabilities) return <section className="card">Checking this device…</section>;
+
+  const readiness = assessReadiness(capabilities);
 
   const selected = routing?.selected;
   const onDevice = selected?.residency === 'device';
@@ -101,6 +104,21 @@ export function DeviceReadiness({ session }: { session: ReturnType<typeof useSes
           );
         })}
       </fieldset>
+
+      {readiness.level !== 'full' && (
+        <div className={`notice notice--${readiness.level}`} role="status">
+          <strong>{readiness.headline}</strong>
+          <p className="muted small">{readiness.detail}</p>
+          {readiness.level === 'degraded' && <p className="muted small">{readiness.expect}</p>}
+          {readiness.level === 'blocked' && (
+            <ul className="muted small">
+              {readiness.remedies.map((remedy) => (
+                <li key={remedy}>{remedy}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {cloudInferenceOffered() ? (
         <label className="toggle">

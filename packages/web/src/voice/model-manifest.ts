@@ -87,9 +87,15 @@ export const MODEL_MANIFEST: StageSpec[] = [
     repo: 'HuggingFaceTB/SmolLM2-1.7B-Instruct',
     // q4f16 on WebGPU is the reference's choice and the only quantisation at
     // this size that keeps weights small enough to sit alongside Whisper and
-    // Kokoro in one tab. There is no wasm entry on purpose: a 1.7B model
-    // decoding on CPU is far outside the conversational budget, so the router
-    // falls back to a cloud model rather than to something unusable.
+    // Kokoro in one tab.
+    //
+    // The wasm entry is here so the stage resolves on a CPU-only machine, not
+    // because a 1.7B model decoding on CPU is a good idea — it is far outside
+    // the conversational budget. An earlier version of this comment claimed
+    // there was no wasm entry and that the router fell back to a cloud model
+    // instead; both halves are now wrong. There is an entry, and cloud is off
+    // by default. `assessReadiness` is what tells someone on such a machine
+    // what to expect, and it points them at the 360M tier rather than this one.
     modules: {
       webgpu: { model: 'q4f16' },
       wasm: { model: 'q4f16' },

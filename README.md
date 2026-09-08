@@ -88,16 +88,26 @@ pnpm --filter @greenroom/web preflight
 interviewer speaks so you can interrupt it; on laptop speakers this leans hard
 on the browser's echo cancellation.
 
-**No WebGPU?** The app tells you so on the setup screen and explains what it
-will do instead. Speech recognition falls back to multi-threaded WASM, the voice
-falls back to the platform synthesiser, and the interviewer model needs either a
-GPU or your explicit consent to use a cloud model — it will not quietly ship
-your answers off-device.
+**No WebGPU?** The setup screen says so before anything downloads, and says what
+it can still do. Speech recognition falls back to multi-threaded WASM and the
+voice falls back to the platform synthesiser; the language model is the stage
+where a GPU is the difference between a conversation and a wait, so a CPU-only
+machine is told to expect several seconds per reply rather than about 1.2s — and
+told that this is an estimate, because no CPU-only run is recorded. If neither
+WebGPU nor SharedArrayBuffer is available, nothing here will work, and the screen
+says that plainly with a list of things to try rather than greying out a model
+list and leaving you to infer why.
+
+The verdict is a pure function of detected capability
+([`readiness.ts`](packages/web/src/voice/readiness.ts)), so every branch is
+tested without a GPU — including the one that says a GPU is present but its
+single-buffer limit is smaller than the smallest bundled model, which is a real
+constraint rather than a proxy for one.
 
 Other useful commands:
 
 ```bash
-pnpm test         # 314 unit tests across five packages
+pnpm test         # 321 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -540,7 +550,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 314 unit tests across five packages, including the pipeline concurrency:
+- 321 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
