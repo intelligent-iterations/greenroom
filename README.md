@@ -32,6 +32,7 @@ the measurement around it, so that is what this is now.
 - [Grounding](#grounding)
 - [Model portability](#model-portability)
 - [Evaluation harness](#evaluation-harness)
+- [Agent skills](#agent-skills)
 - [Infrastructure and deployment](#infrastructure-and-deployment)
 - [Project status: what is verified and what is not](#project-status-what-is-verified-and-what-is-not)
 - [Repository map](#repository-map)
@@ -107,7 +108,7 @@ constraint rather than a proxy for one.
 Other useful commands:
 
 ```bash
-pnpm test         # 321 unit tests across five packages
+pnpm test         # 336 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -487,6 +488,32 @@ for what that run actually found.
 Full detail, including how to calibrate the judge against human raters, is in
 [docs/EVALUATION.md](docs/EVALUATION.md).
 
+## Agent skills
+
+Three skills ship in [`.claude/skills`](.claude/skills), so an agent working in a
+clone of this repo — or on somebody else's voice product entirely — starts with
+the judgement this one paid for rather than rediscovering it.
+
+| Skill | For |
+|---|---|
+| `voice-evals` | Writing held-out cases for a spoken agent, running them, reading the result |
+| `voice-checks` | Deciding whether something is a rule or a judgement, and writing either |
+| `voice-pipeline` | Building or debugging a cascade, and choosing between cascade and duplex |
+
+They are written to be portable: the method first, this repo as the worked
+example. What they encode is the expensive half — cases are situations rather
+than expected answers; a check that cannot fail is worse than none; verify the
+quote, not just that one was given; score only what the model was actually given;
+anchor latency on speech-end rather than mic-open; a reasoning model shares its
+token budget between thinking and answering.
+
+**The skills are under test.** `packages/shared/src/__tests__/skills.test.ts`
+holds them to the parts of themselves that are mechanically checkable — the
+frontmatter, every file they cite, every check and rubric dimension they name,
+and every `pnpm` script they tell someone to run. Prose an agent acts on is worse
+when stale than when missing, and this repo does not get to exempt its own
+documentation from the rule it applies to its checks.
+
 ## Infrastructure and deployment
 
 The backend is a Firebase project, split between two tools by cadence:
@@ -550,7 +577,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 321 unit tests across five packages, including the pipeline concurrency:
+- 336 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
