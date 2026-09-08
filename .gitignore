@@ -11,6 +11,9 @@ build/
 serviceAccount*.json
 
 # firebase
+# Points every clone at one specific project; .firebaserc.example is the
+# tracked shape. `firebase use <project>` writes this locally.
+.firebaserc
 .firebase/
 firebase-debug.log
 ui-debug.log

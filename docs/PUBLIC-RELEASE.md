@@ -19,6 +19,28 @@ has been pushed, so the live origin is an older build.
 
 ## Security review
 
+### Re-verified 2026-09-08, against the current tree
+
+The numbers below were first recorded before the generalisation work, which
+added roughly twenty commits of new code — a quota module, a duplex seam, a
+retriever, a readiness assessor. An inherited "0 findings" is not a result, so
+the scanners were run again rather than trusted:
+
+| Scan | Result |
+|---|---|
+| Semgrep (`p/default`, `typescript`, `react`, `secrets`, `owasp-top-ten`) | **0 findings**, 387 rules, 177 files |
+| gitleaks, full history | **no leaks**, 43 commits, 1.14 MB scanned |
+| `pnpm audit` | 8 advisories, **none reachable from shipped code** |
+
+On the advisories: six are under `firebase-tools`, a devDependency used only at
+deploy time. Two are high — `sharp` and `adm-zip` — and both arrive through
+`@huggingface/transformers` in the **web and evals** workspaces, on Node paths
+the browser never takes. The deployed function bundle was checked directly and
+contains no transformers, no onnxruntime, no adm-zip and no sharp; its runtime
+dependencies are `firebase-functions`, `firebase-admin` and `zod`, and nothing
+else. (The one `sharp` string match in that bundle is the word "sharper" in a
+rubric anchor.)
+
 - [x] **Static analysis.** `.github/workflows/security.yml` runs CodeQL
       (`security-and-quality`), Semgrep (default, typescript, react, secrets,
       OWASP top ten), gitleaks over full history, and a dependency audit — on

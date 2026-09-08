@@ -96,11 +96,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:shared
 
+      # Stated rather than inferred. The build already ships cloud-off when this
+      # is unset, but "off because nobody set it" is the same shape of accident
+      # the server side was fixed to avoid — see CLOUD_INFERENCE_ENABLED.
       - name: Build the web app
         if: inputs.target == 'hosting' || inputs.target == 'everything'
         # No INCLUDE_DEV_PAGES: the benchmark, eval runner and probes are
         # instruments, and publishing pages that download gigabytes of models
         # to a public origin is not something to do by accident.
+        env:
+          VITE_CLOUD_ENABLED: 'false'
         run: pnpm --filter @greenroom/web build
 
       - name: Build the functions bundle

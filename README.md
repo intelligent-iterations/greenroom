@@ -1,25 +1,34 @@
-# Realtime local voice playground
+# Greenroom
 
-**A place to hear what on-device voice models actually sound like — and to find
-out whether they hold a role.**
+**Build a voice agent, then find out whether it is any good — without either
+half leaving your machine.**
 
 Live: **https://greenroom-ii.web.app**
 
-You talk, it answers, you interrupt it mid-sentence and it stops. Speech
-recognition, the language model and the voice all run in the browser tab. On a
-machine with WebGPU, no audio and no transcript leaves the device.
+Two things in one repository, and the second is the durable one.
 
-Pick a partner — an open conversation, a language tutor, a difficult customer,
-or a system prompt you write yourself. Pick a model: one of four bundled tiers
-from 260 MB to 2.7 GB, any Hugging Face repository with ONNX weights, or a
-folder of models you already have on disk. Then check your work: upload a CSV of
-cases and score the model on the machine in front of you.
+**A voice pipeline that runs in a browser tab.** You talk, it answers, you
+interrupt it mid-sentence and it stops. Speech recognition, the language model
+and the voice all run locally; on a machine with WebGPU, no audio and no
+transcript leaves the device. Pick one of four bundled model tiers from 260 MB
+to 2.7 GB, any Hugging Face repository with ONNX weights, or a folder you
+already have on disk.
 
-This started as an interview trainer, and that survives as one preset among
-several — including its pedagogical prompt layer, which is the most interesting
-prompt in the repository. But the durable part turned out to be the pipeline and
-the measurement around it, so that is what this is now.
+**An evaluation harness for spoken agents**, which is the part worth reusing.
+Voice failures are not chat failures: markdown read aloud as "asterisk", three
+questions stacked into one turn nobody can hold, a reply that never hands the
+floor back. So the checks are voice-specific, composed per agent — a support bot
+must not be failed for answering rather than asking — and what needs judgement
+goes to an anchored rubric whose scores must quote the turn. Bring your own
+agent as a system prompt, your own cases as JSONL or a CSV, and gate a build on
+the result.
 
+The core knows nothing about any particular kind of agent. Interview coaching is
+the worked example that proves the core is usable, behind its own entry point,
+and a test fails if it leaks back.
+
+Three agent skills ship in `.claude/skills/` so an agent working on *your* voice
+product starts with the judgement this one paid for.
 ---
 
 ## Contents

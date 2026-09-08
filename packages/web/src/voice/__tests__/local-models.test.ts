@@ -15,15 +15,15 @@ function fileOf(name: string, body = 'x'): File {
   return new File([body], name);
 }
 
-const chosen: [string, File][] = [
+const chosen = new Map<string, File>([
   ['my-model/config.json', fileOf('config.json')],
   ['my-model/onnx/model_q4.onnx', fileOf('model_q4.onnx')],
-];
+]);
 
 describe('findLocalFile', () => {
   it('serves a file the user chose', () => {
     expect(findLocalFile(chosen, 'https://huggingface.co/repo/resolve/main/config.json')).toBe(
-      chosen[0]![1],
+      chosen.get('my-model/config.json'),
     );
   });
 
@@ -41,13 +41,13 @@ describe('findLocalFile', () => {
     ]) {
       const found = findLocalFile(chosen, attack);
       // Whatever it returns, it can only ever be one of the files handed over.
-      expect(found === undefined || chosen.some(([, f]) => f === found)).toBe(true);
+      expect(found === undefined || [...chosen.values()].includes(found)).toBe(true);
     }
   });
 
   it('only ever returns a file from the given list', () => {
     const found = findLocalFile(chosen, 'anything-at-all');
-    expect(found === undefined || chosen.some(([, f]) => f === found)).toBe(true);
+    expect(found === undefined || [...chosen.values()].includes(found)).toBe(true);
   });
 });
 
