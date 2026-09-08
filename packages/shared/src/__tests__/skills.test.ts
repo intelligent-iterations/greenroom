@@ -24,7 +24,7 @@ function skillFiles(): Array<{ name: string; text: string }> {
 
 const skills = skillFiles();
 const checkSource = readFileSync(join(ROOT, 'packages/shared/src/checks.ts'), 'utf8');
-const realChecks = new Set([...checkSource.matchAll(/check\(\s*'([a-z_]+)'/g)].map((m) => m[1]!));
+const realChecks = new Set([...checkSource.matchAll(/name: '([a-z_]+)'/g)].map((m) => m[1]!));
 
 describe('agent skills', () => {
   it('ships at least the three voice skills', () => {

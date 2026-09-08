@@ -22,7 +22,7 @@ chatbot, and most suites miss all of them:
 | `single_question` | two or three questions stacked into one spoken turn, which a listener cannot hold |
 | `length` | a turn too long to listen to, which is far shorter than one too long to read |
 | `asks_a_question` | a turn that never hands the floor back, so the person does not know it is their go |
-| `interviewer_register` | assistant voice bleeding in — "feel free to", "thanks for sharing", "great question" |
+| `no_assistant_voice` | assistant register bleeding into a character — "feel free to", "thanks for sharing", "great question" |
 | `language` | answering in the wrong language for the scenario |
 | `not_reciting_context` | reading a retrieved passage back verbatim instead of using it |
 
@@ -63,12 +63,37 @@ what you built…" — a statement, not a question, in a product where a turn mu
 hand the floor back — the right answer was to leave the check alone and record a
 finding about the model.
 
-## Adding a check
+## Compose the packs your agent actually needs
 
-There is no registry; checks are imperative pushes inside `runChecks`, in order:
+Checks are values grouped into packs, because "which checks apply?" depends on
+what you are building. A support bot must not be failed for answering rather
+than asking; an interviewer must not be let off for giving away the answer.
+
+| Pack | For |
+|---|---|
+| `SPOKEN_CHECKS` | Anything read aloud. Assumes nothing about purpose. |
+| `IN_CHARACTER_CHECKS` | An agent playing a role rather than being an assistant |
+| `TURN_TAKING_CHECKS` | An agent that must hand the floor back every turn |
+| `COACHING_CHECKS` | An agent whose job is to make someone *else* produce the answer |
 
 ```ts
-results.push(check('my_check', predicate, 'why it failed', /* critical */ false));
+runChecks(turn, context, [...SPOKEN_CHECKS, ...TURN_TAKING_CHECKS]);
+```
+
+Choosing wrongly is a real failure mode in both directions. `asks_a_question` is
+critical for a tutor and nonsense for a support agent. `no_answer_leakage` is
+critical for an examiner and the opposite of the job for a docs assistant.
+
+## Adding a check
+
+A check is a value. `run` returns `undefined` to stay silent — for a check that
+needs context this turn did not carry, which is different from passing.
+
+```ts
+{ name: 'my_check', critical: false,
+  run: (turn, ctx) => ctx.injectedPassages
+    ? { passed: predicate(turn), detail: 'why it failed' }
+    : undefined }
 ```
 
 Mark `critical` only for actual harm — answer leakage, unsafe content. Not for

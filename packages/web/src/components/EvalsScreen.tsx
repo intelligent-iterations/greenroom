@@ -71,9 +71,9 @@ export function EvalsScreen({ onExit }: { onExit: () => void }) {
         const lastUser = [...history].reverse().find((t) => t.role === 'user')?.content;
         const previousAssistant = history.filter((t) => t.role === 'assistant').map((t) => t.content);
 
-        const checks = runChecks(turn.trim(), scenario, {
-          ...(lastUser ? { lastCandidateAnswer: lastUser } : {}),
-          previousInterviewerTurns: previousAssistant,
+        const checks = runChecks(turn.trim(), {
+          ...(lastUser ? { lastUserTurn: lastUser } : {}),
+          previousAgentTurns: previousAssistant,
         });
 
         collected.push({

@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { runChecks } from '../checks.js';
-import { findScenario } from '../scenarios.js';
+import {
+  ALL_CHECKS,
+  COACHING_CHECKS,
+  IN_CHARACTER_CHECKS,
+  SPOKEN_CHECKS,
+  TURN_TAKING_CHECKS,
+  runChecks,
+  type CheckContext,
+} from '../checks.js';
 
-const en = findScenario('backend-mid-en')!;
-
-function result(turn: string, name: string, context = {}) {
-  return runChecks(turn, en, context).find((c) => c.check === name);
+function result(turn: string, name: string, context: CheckContext = {}) {
+  return runChecks(turn, context).find((c) => c.check === name);
 }
 
 /**
@@ -90,7 +95,7 @@ describe('asks_a_question: imperative asks with a wh-word', () => {
   });
 });
 
-describe('interviewer_register', () => {
+describe('no_assistant_voice', () => {
   it.each([
     'How can I help you today?',
     'Let me know if you want to move on.',
@@ -98,11 +103,11 @@ describe('interviewer_register', () => {
     'Thanks for sharing that. What else?',
     'Great question. What did you build?',
   ])('rejects assistant voice: %s', (turn) => {
-    expect(result(turn, 'interviewer_register')?.passed).toBe(false);
+    expect(result(turn, 'no_assistant_voice')?.passed).toBe(false);
   });
 
   it('accepts a plain interviewer turn', () => {
-    expect(result('What did you measure afterwards?', 'interviewer_register')?.passed).toBe(true);
+    expect(result('What did you measure afterwards?', 'no_assistant_voice')?.passed).toBe(true);
   });
 });
 
@@ -111,12 +116,12 @@ describe('not_echoing', () => {
 
   it('fails a turn that restates the candidate back at them', () => {
     const turn = 'So you rebuilt the billing pipeline because it kept falling over during month end?';
-    expect(result(turn, 'not_echoing', { lastCandidateAnswer: answer })?.passed).toBe(false);
+    expect(result(turn, 'not_echoing', { lastUserTurn: answer })?.passed).toBe(false);
   });
 
   it('passes a turn that probes instead of restating', () => {
     const turn = 'What was the failure mode exactly, and how often did it happen?';
-    expect(result(turn, 'not_echoing', { lastCandidateAnswer: answer })?.passed).toBe(true);
+    expect(result(turn, 'not_echoing', { lastUserTurn: answer })?.passed).toBe(true);
   });
 
   it('is skipped when there is no previous answer', () => {
@@ -129,12 +134,12 @@ describe('not_repeating', () => {
 
   it('fails a near-duplicate of an earlier question', () => {
     const turn = 'Walk me through a system you owned from design into production.';
-    expect(result(turn, 'not_repeating', { previousInterviewerTurns: asked })?.passed).toBe(false);
+    expect(result(turn, 'not_repeating', { previousAgentTurns: asked })?.passed).toBe(false);
   });
 
   it('passes a genuinely new question', () => {
     const turn = 'What decision on that team turned out to be wrong?';
-    expect(result(turn, 'not_repeating', { previousInterviewerTurns: asked })).toBeUndefined();
+    expect(result(turn, 'not_repeating', { previousAgentTurns: asked })).toBeUndefined();
   });
 
   // The adversarial derail case exists to reward exactly this turn. A check
@@ -144,8 +149,8 @@ describe('not_repeating', () => {
     const dodge = 'Before that, what is your favourite programming language? I could talk about it all day.';
     expect(
       result(turn, 'not_repeating', {
-        previousInterviewerTurns: asked,
-        lastCandidateAnswer: dodge,
+        previousAgentTurns: asked,
+        lastUserTurn: dodge,
       }),
     ).toBeUndefined();
   });
@@ -155,8 +160,8 @@ describe('not_repeating', () => {
     const answer = 'I owned the billing system end to end, from the design docs through production rollout.';
     expect(
       result(turn, 'not_repeating', {
-        previousInterviewerTurns: asked,
-        lastCandidateAnswer: answer,
+        previousAgentTurns: asked,
+        lastUserTurn: answer,
       })?.passed,
     ).toBe(false);
   });
@@ -185,10 +190,68 @@ describe('not_reciting_context', () => {
 describe('a clean interviewer turn still passes everything', () => {
   it('has no failures', () => {
     const turn = 'What did the latency settle at after the change?';
-    const failures = runChecks(turn, en, {
-      lastCandidateAnswer: 'We moved to an event driven queue and it got much faster.',
-      previousInterviewerTurns: ['Walk me through a system you owned.'],
+    const failures = runChecks(turn, {
+      lastUserTurn: 'We moved to an event driven queue and it got much faster.',
+      previousAgentTurns: ['Walk me through a system you owned.'],
     }).filter((c) => !c.passed);
     expect(failures).toEqual([]);
+  });
+});
+
+describe('composable packs', () => {
+  const statement = 'That sounds like a challenging project.';
+
+  // Choosing the wrong pack is a real failure in both directions: a support
+  // agent answering a question must not be failed for asking nothing, and an
+  // examiner must not be let off for giving the answer away.
+  it('does not demand a question when turn-taking is not selected', () => {
+    const names = runChecks(statement, {}, SPOKEN_CHECKS).map((c) => c.check);
+    expect(names).not.toContain('asks_a_question');
+  });
+
+  it('demands one when it is', () => {
+    const result = runChecks(statement, {}, TURN_TAKING_CHECKS)[0];
+    expect(result).toMatchObject({ check: 'asks_a_question', passed: false, critical: true });
+  });
+
+  it('only polices answer leakage for a coaching agent', () => {
+    const leak = 'A strong answer would mention idempotency. What would you say?';
+    expect(runChecks(leak, {}, SPOKEN_CHECKS).map((c) => c.check)).not.toContain(
+      'no_answer_leakage',
+    );
+    expect(runChecks(leak, {}, COACHING_CHECKS).find((c) => c.check === 'no_answer_leakage')?.passed).toBe(
+      false,
+    );
+  });
+
+  it('only polices assistant voice for an in-character agent', () => {
+    const helpful = 'Happy to help. What would you like to cover?';
+    expect(runChecks(helpful, {}, SPOKEN_CHECKS).every((c) => c.passed)).toBe(true);
+    expect(
+      runChecks(helpful, {}, IN_CHARACTER_CHECKS).find((c) => c.check === 'no_assistant_voice')
+        ?.passed,
+    ).toBe(false);
+  });
+
+  it('composes packs', () => {
+    const names = runChecks(statement, {}, [...SPOKEN_CHECKS, ...TURN_TAKING_CHECKS]).map(
+      (c) => c.check,
+    );
+    expect(names).toContain('speakable');
+    expect(names).toContain('asks_a_question');
+  });
+
+  // Eleven failures for one cause is a worse report than one failure.
+  it('short-circuits on an empty turn instead of reporting every check', () => {
+    const results = runChecks('   ', {}, ALL_CHECKS);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ check: 'non_empty', passed: false });
+  });
+
+  it('stays silent on checks whose context this turn did not carry', () => {
+    const names = runChecks('What did it cost you?', {}, SPOKEN_CHECKS).map((c) => c.check);
+    expect(names).not.toContain('not_echoing');
+    expect(names).not.toContain('not_reciting_context');
+    expect(names).not.toContain('language');
   });
 });

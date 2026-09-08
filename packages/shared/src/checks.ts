@@ -7,7 +7,6 @@ export interface CheckResult {
   critical: boolean;
 }
 
-import type { InterviewScenario } from './domain.js';
 
 /**
  * Deterministic checks.
@@ -158,12 +157,14 @@ function check(name: string, passed: boolean, detail: string, critical = false):
  * both mechanical, but only against what came before.
  */
 export interface CheckContext {
-  /** Interviewer turns already spoken this session, oldest first. */
-  previousInterviewerTurns?: string[];
-  /** What the candidate said immediately before this turn. */
-  lastCandidateAnswer?: string;
+  /** Agent turns already spoken this session, oldest first. */
+  previousAgentTurns?: string[];
+  /** What the user said immediately before this turn. */
+  lastUserTurn?: string;
   /** Retrieved passages put in front of the model for this turn, verbatim. */
   injectedPassages?: string[];
+  /** Language the turn is expected to be in, when the caller cares. */
+  expectedLanguage?: string;
 }
 
 /** Content words, lowercased, for overlap comparisons. */
@@ -249,115 +250,228 @@ function normaliseWords(text: string): string[] {
     .filter((w) => w.length > 0);
 }
 
+/**
+ * A check, as a value.
+ *
+ * Checks used to be imperative pushes inside one function, which worked while
+ * there was one kind of agent. It stopped working the moment the answer to
+ * "which checks apply?" became "it depends what you are building": a support
+ * bot must not be failed for answering rather than asking, and an interviewer
+ * must not be let off for giving away the answer.
+ *
+ * So a check is a value, packs are arrays of them, and the caller composes.
+ * `run` returns undefined to stay silent — for a check that needs context this
+ * turn did not carry, which is different from passing.
+ */
+export interface Check {
+  name: string;
+  critical: boolean;
+  run(turn: string, context: CheckContext): { passed: boolean; detail: string } | undefined;
+}
+
+/**
+ * Checks that apply to any agent whose output is read aloud.
+ *
+ * Nothing here assumes what the agent is for. These are the properties of
+ * speech itself — that it can be synthesised, that it is short enough to hold,
+ * that it is in the expected language, that it is not parroting.
+ */
+export const SPOKEN_CHECKS: Check[] = [
+  {
+    name: 'non_empty',
+    critical: true,
+    run: (turn) => ({ passed: turn.length > 0, detail: 'the model produced no turn' }),
+  },
+  {
+    name: 'speakable',
+    critical: true,
+    run: (turn) => {
+      const found = UNSPEAKABLE.filter((u) => u.pattern.test(turn)).map((u) => u.label);
+      return { passed: found.length === 0, detail: `contains ${found.join(', ')}` };
+    },
+  },
+  {
+    name: 'length',
+    critical: false,
+    run: (turn) => {
+      const words = turn.split(/\s+/).length;
+      return {
+        passed: words <= MAX_SPOKEN_WORDS,
+        detail: `${words} words, over the ${MAX_SPOKEN_WORDS} limit`,
+      };
+    },
+  },
+  {
+    name: 'single_question',
+    critical: false,
+    run: (turn) => {
+      const questions = (turn.match(/\?/g) ?? []).length;
+      return { passed: questions <= 1, detail: `asks ${questions} questions in one turn` };
+    },
+  },
+  {
+    name: 'language',
+    critical: true,
+    // Only meaningful when the caller says what was expected. A whole turn in
+    // the wrong language is a total failure that a composite score would
+    // otherwise dilute across nine dimensions.
+    run: (turn, ctx) => {
+      if (ctx.expectedLanguage !== 'fr') return undefined;
+      return { passed: looksFrench(turn), detail: 'expected French, got something else' };
+    },
+  },
+  {
+    name: 'not_echoing',
+    critical: false,
+    run: (turn, ctx) => {
+      if (ctx.lastUserTurn === undefined) return undefined;
+      const echo = overlap(turn, ctx.lastUserTurn);
+      return {
+        passed: echo < ECHO_THRESHOLD,
+        detail: `restates the user's own words (${echo.toFixed(2)} overlap)`,
+      };
+    },
+  },
+  {
+    name: 'not_repeating',
+    critical: false,
+    run: (turn, ctx) => {
+      for (const previous of ctx.previousAgentTurns ?? []) {
+        if (overlap(turn, previous) < REPEAT_THRESHOLD) continue;
+        // Re-asking something the user dodged is doing the job, not repeating.
+        // Only something they actually engaged with is worth flagging, so their
+        // last turn decides: if it barely touches the earlier one, they never
+        // answered it. Without this the check fires hardest on exactly the
+        // behaviour an adversarial derail case exists to reward.
+        if (
+          ctx.lastUserTurn !== undefined &&
+          overlap(ctx.lastUserTurn, previous) < ENGAGEMENT_FLOOR
+        ) {
+          continue;
+        }
+        return {
+          passed: false,
+          detail: `repeats an earlier turn (${overlap(turn, previous).toFixed(2)} overlap)`,
+        };
+      }
+      return undefined;
+    },
+  },
+  {
+    name: 'not_reciting_context',
+    critical: false,
+    run: (turn, ctx) => {
+      for (const passage of ctx.injectedPassages ?? []) {
+        const run = longestSharedRun(turn, passage);
+        if (run <= MAX_VERBATIM_RUN) continue;
+        return { passed: false, detail: `reads ${run} words of its own context back at the user` };
+      }
+      return undefined;
+    },
+  },
+];
+
+/**
+ * For an agent playing a character rather than being an assistant.
+ *
+ * Separate from SPOKEN_CHECKS because plenty of voice agents are *supposed* to
+ * sound like a helpful assistant, and failing those for saying "happy to help"
+ * would be the check being wrong rather than the agent.
+ */
+export const IN_CHARACTER_CHECKS: Check[] = [
+  {
+    name: 'in_character',
+    critical: true,
+    run: (turn) => ({
+      passed: !ROLE_BREAKS.some((p) => p.test(turn)),
+      detail: 'breaks character',
+    }),
+  },
+  {
+    name: 'no_assistant_voice',
+    critical: true,
+    run: (turn) => ({
+      passed: !ASSISTANT_VOICE.some((p) => p.test(turn)),
+      detail: 'slips into assistant voice',
+    }),
+  },
+];
+
+/**
+ * For an agent that must hand the floor back every turn.
+ *
+ * An interviewer, a tutor, a survey bot. Not a support agent answering a
+ * question, which is why this is opt-in: a turn that asks nothing is correct
+ * behaviour for some agents and a broken session for others.
+ */
+export const TURN_TAKING_CHECKS: Check[] = [
+  {
+    name: 'asks_a_question',
+    critical: true,
+    run: (turn) => {
+      const asks =
+        (turn.match(/\?/g) ?? []).length >= 1 ||
+        IMPERATIVE_ASK.some((p) => p.test(turn)) ||
+        RETURNS_FLOOR.some((p) => p.test(turn));
+      return { passed: asks, detail: 'asks nothing and does not return the floor' };
+    },
+  },
+];
+
+/**
+ * For an agent whose job is to make someone else produce the answer.
+ *
+ * A coach, an interviewer, a tutor, an examiner. Giving away the answer or
+ * grading mid-session defeats the exercise; for an agent that is meant to
+ * explain things, both are the point.
+ */
+export const COACHING_CHECKS: Check[] = [
+  {
+    name: 'no_answer_leakage',
+    critical: true,
+    run: (turn) => {
+      const leaks = LEAKAGE.filter((p) => p.test(turn));
+      return { passed: leaks.length === 0, detail: `matched ${leaks.length} leakage pattern(s)` };
+    },
+  },
+  {
+    name: 'no_mid_session_feedback',
+    critical: false,
+    run: (turn) => ({
+      passed: !MID_SESSION_FEEDBACK.some((p) => p.test(turn)),
+      detail: 'grades the user mid-session',
+    }),
+  },
+];
+
+/** Everything, for an agent that is all of the above. */
+export const ALL_CHECKS: Check[] = [
+  ...SPOKEN_CHECKS,
+  ...IN_CHARACTER_CHECKS,
+  ...TURN_TAKING_CHECKS,
+  ...COACHING_CHECKS,
+];
+
+/**
+ * Run a set of checks against one turn.
+ *
+ * `non_empty` short-circuits: every other check would report nonsense about an
+ * empty string, and a list of eleven failures for one cause is a worse report
+ * than one failure.
+ */
 export function runChecks(
   turn: string,
-  scenario: InterviewScenario,
   context: CheckContext = {},
+  checks: Check[] = ALL_CHECKS,
 ): CheckResult[] {
-  const results: CheckResult[] = [];
   const text = turn.trim();
+  const results: CheckResult[] = [];
 
-  results.push(check('non_empty', text.length > 0, 'the model produced no turn', true));
-  if (text.length === 0) return results;
-
-  const unspeakable = UNSPEAKABLE.filter((u) => u.pattern.test(text)).map((u) => u.label);
-  results.push(
-    check('speakable', unspeakable.length === 0, `contains ${unspeakable.join(', ')}`, true),
-  );
-
-  const words = text.split(/\s+/).length;
-  results.push(
-    check('length', words <= MAX_SPOKEN_WORDS, `${words} words, over the ${MAX_SPOKEN_WORDS} limit`),
-  );
-
-  const questions = (text.match(/\?/g) ?? []).length;
-  results.push(
-    check('single_question', questions <= 1, `asks ${questions} questions in one turn`),
-  );
-
-  // The check that was missing. An interviewer interviews; a turn that asks
-  // nothing has stopped doing the job, however well-formed it is. Critical,
-  // because a session of statements is not an interview at all.
-  //
-  // Counts imperative asks and turns that hand the floor back to a question
-  // already asked — see IMPERATIVE_ASK and RETURNS_FLOOR.
-  const asks =
-    questions >= 1 ||
-    IMPERATIVE_ASK.some((p) => p.test(text)) ||
-    RETURNS_FLOOR.some((p) => p.test(text));
-  results.push(
-    check('asks_a_question', asks, 'asks nothing and does not return the floor', true),
-  );
-
-  const assistant = ASSISTANT_VOICE.filter((p) => p.test(text));
-  results.push(
-    check('interviewer_register', assistant.length === 0, 'slips into assistant voice', true),
-  );
-
-  if (context.lastCandidateAnswer) {
-    const echo = overlap(text, context.lastCandidateAnswer);
-    results.push(
-      check(
-        'not_echoing',
-        echo < ECHO_THRESHOLD,
-        `restates the candidate's own answer (${echo.toFixed(2)} overlap)`,
-      ),
-    );
-  }
-
-  for (const previous of context.previousInterviewerTurns ?? []) {
-    const repeat = overlap(text, previous);
-    if (repeat < REPEAT_THRESHOLD) continue;
-    // Re-asking a question the candidate dodged is correct interviewing, not a
-    // repeat. Only a question they actually engaged with is one worth flagging,
-    // so the candidate's last answer decides: if it barely touches the earlier
-    // question, they never answered it and the interviewer is right to return.
-    // Without this the check fires hardest on exactly the behaviour the
-    // adversarial derail case exists to reward.
-    if (
-      context.lastCandidateAnswer !== undefined &&
-      overlap(context.lastCandidateAnswer, previous) < ENGAGEMENT_FLOOR
-    ) {
-      continue;
-    }
-    results.push(
-      check('not_repeating', false, `repeats an earlier question (${repeat.toFixed(2)} overlap)`),
-    );
-    break;
-  }
-
-  for (const passage of context.injectedPassages ?? []) {
-    const run = longestSharedRun(text, passage);
-    if (run <= MAX_VERBATIM_RUN) continue;
-    results.push(
-      check(
-        'not_reciting_context',
-        false,
-        `reads ${run} words of its own context back at the candidate`,
-      ),
-    );
-    break;
-  }
-
-  const leaks = LEAKAGE.filter((p) => p.test(text));
-  results.push(
-    check('no_answer_leakage', leaks.length === 0, `matched ${leaks.length} leakage pattern(s)`, true),
-  );
-
-  const breaks = ROLE_BREAKS.filter((p) => p.test(text));
-  results.push(check('in_character', breaks.length === 0, 'breaks the interviewer role', true));
-
-  const feedback = MID_SESSION_FEEDBACK.filter((p) => p.test(text));
-  results.push(
-    check('no_mid_session_feedback', feedback.length === 0, 'grades the candidate mid-interview'),
-  );
-
-  // A French scenario answered in English is a total failure that the composite
-  // score would otherwise dilute across eight dimensions.
-  if (scenario.language === 'fr') {
-    results.push(
-      check('language', looksFrench(text), 'expected French, got something else', true),
-    );
+  for (const spec of checks) {
+    const outcome = spec.run(text, context);
+    if (outcome === undefined) continue;
+    results.push(check(spec.name, outcome.passed, outcome.detail, spec.critical));
+    if (spec.name === 'non_empty' && !outcome.passed) return results;
   }
 
   return results;

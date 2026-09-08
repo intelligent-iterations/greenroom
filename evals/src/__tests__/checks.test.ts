@@ -1,20 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { runChecks } from '../checks.ts';
-import { findScenario } from '../deps.ts';
 
-const en = findScenario('backend-mid-en')!;
-const fr = findScenario('support-junior-fr')!;
 
 /** Convenience: did the named check pass? */
-function passed(turn: string, name: string, scenario = en): boolean {
-  return runChecks(turn, scenario).find((c) => c.check === name)?.passed ?? false;
+function passed(turn: string, name: string, expectedLanguage?: string): boolean {
+  return runChecks(turn, expectedLanguage ? { expectedLanguage } : {})
+    .find((c) => c.check === name)?.passed ?? false;
 }
 
 const GOOD = 'Walk me through a system you owned from design into production.';
 
 describe('a clean turn passes everything', () => {
   it('has no failures', () => {
-    expect(runChecks(GOOD, en).filter((c) => !c.passed)).toEqual([]);
+    expect(runChecks(GOOD).filter((c) => !c.passed)).toEqual([]);
   });
 });
 
@@ -84,21 +82,21 @@ describe('mid-session feedback', () => {
 
 describe('language', () => {
   it('accepts French in a French scenario', () => {
-    expect(passed('Parlez-moi d\'une fois où un client était mécontent.', 'language', fr)).toBe(true);
+    expect(passed('Parlez-moi d\'une fois où un client était mécontent.', 'language', 'fr')).toBe(true);
   });
 
   it('rejects English in a French scenario', () => {
-    expect(passed('Tell me about a time a customer was unhappy.', 'language', fr)).toBe(false);
+    expect(passed('Tell me about a time a customer was unhappy.', 'language', 'fr')).toBe(false);
   });
 
   it('does not apply the language check to English scenarios', () => {
-    expect(runChecks(GOOD, en).some((c) => c.check === 'language')).toBe(false);
+    expect(runChecks(GOOD).some((c) => c.check === 'language')).toBe(false);
   });
 });
 
 describe('empty output', () => {
   it('fails critically and stops further checks', () => {
-    const results = runChecks('   ', en);
+    const results = runChecks('   ');
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ check: 'non_empty', passed: false, critical: true });
   });

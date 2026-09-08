@@ -149,17 +149,18 @@ export async function runCase(
   // present in every report and can never fire, which is the "looks like
   // coverage" failure checks.ts warns about. The transcript the case already
   // carries is exactly what they need.
-  const previousInterviewerTurns = testCase.transcript
+  const previousAgentTurns = testCase.transcript
     .filter((t) => t.role === 'interviewer')
     .map((t) => t.text);
-  const lastCandidateAnswer = [...testCase.transcript]
+  const lastUserTurn = [...testCase.transcript]
     .reverse()
     .find((t) => t.role === 'learner')?.text;
 
-  const checks = runChecks(turn, scenario, {
-    ...(previousInterviewerTurns.length ? { previousInterviewerTurns } : {}),
-    ...(lastCandidateAnswer ? { lastCandidateAnswer } : {}),
+  const checks = runChecks(turn, {
+    ...(previousAgentTurns.length ? { previousAgentTurns } : {}),
+    ...(lastUserTurn ? { lastUserTurn } : {}),
     ...(passages.length > 0 ? { injectedPassages: passages.map((p) => p.text) } : {}),
+    expectedLanguage: scenario.language,
   });
 
   let scores: Score[] = [];

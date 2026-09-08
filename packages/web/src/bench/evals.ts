@@ -200,9 +200,9 @@ async function main() {
         .filter((t) => t.role === 'interviewer')
         .map((t) => t.text);
 
-      const checks: CheckResult[] = runChecks(turn.trim(), scenario, {
-        ...(lastCandidate ? { lastCandidateAnswer: lastCandidate } : {}),
-        previousInterviewerTurns: previousInterviewer,
+      const checks: CheckResult[] = runChecks(turn.trim(), {
+        ...(lastCandidate ? { lastUserTurn: lastCandidate } : {}),
+        previousAgentTurns: previousInterviewer,
       });
 
       outcomes.push({
