@@ -11,10 +11,38 @@ import type { CheckResult } from '@greenroom/shared';
  */
 export const EvalCase = z.object({
   id: z.string().min(1),
-  /** Scenario id from the shared catalogue. */
-  scenario: z.string().min(1),
   /** One line on what this case is probing, shown in the report. */
   probes: z.string().min(1),
+  /**
+   * The agent under test, supplied directly.
+   *
+   * The general path, and the one to use for your own agent: a case carries the
+   * prompt its agent runs under, and the harness needs to know nothing else
+   * about what that agent is for.
+   */
+  systemPrompt: z.string().min(1).optional(),
+  /** Language the turn is expected to be in, when it matters. */
+  language: z.string().optional(),
+  /** Facts the agent already knows. Added to the retrieval corpus. */
+  contextNotes: z.array(z.string()).default([]),
+  /**
+   * A bundled example agent to compile a prompt from instead.
+   *
+   * Sugar for the interview example that ships with this repo. Ignored when
+   * `systemPrompt` is set.
+   */
+  scenario: z.string().min(1).optional(),
+  /**
+   * Which check packs apply to this agent.
+   *
+   * Defaults to all of them, which is right for the bundled interview example
+   * and wrong for most other agents: a support agent answering a question must
+   * not be failed by `asks_a_question`, and an agent whose job is explaining
+   * must not be failed by `no_answer_leakage`.
+   */
+  checkPacks: z.array(z.enum(['spoken', 'in_character', 'turn_taking', 'coaching'])).optional(),
+  /** Which rubric packs to score against. Defaults to all. */
+  rubricPacks: z.array(z.enum(['spoken', 'coaching', 'language_learning'])).optional(),
   /** Learner-state overrides. Everything unset uses the fixture default. */
   learner: z
     .object({
@@ -25,7 +53,16 @@ export const EvalCase = z.object({
     .default({}),
   /** Conversation before the turn under test. Empty means the opening turn. */
   transcript: z
-    .array(z.object({ role: z.enum(['interviewer', 'learner']), text: z.string() }))
+    .array(
+      z.object({
+        // 'interviewer' and 'learner' are the older names, still accepted so
+        // the bundled datasets keep parsing. New cases should say agent/user.
+        role: z
+          .enum(['agent', 'user', 'interviewer', 'learner'])
+          .transform((r) => (r === 'interviewer' ? 'agent' : r === 'learner' ? 'user' : r)),
+        text: z.string(),
+      }),
+    )
     .default([]),
   /**
    * The turn the replay backend serves for this case.

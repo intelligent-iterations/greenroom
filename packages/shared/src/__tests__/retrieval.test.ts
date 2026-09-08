@@ -49,7 +49,7 @@ describe('buildCorpus', () => {
   it('carries the scenario notes and tags their source', () => {
     const corpus = buildCorpus(en, []);
     expect(corpus).toHaveLength(en.contextNotes.length);
-    for (const entry of corpus) expect(entry.sourceId).toBe(`scenario:${en.id}`);
+    for (const entry of corpus) expect(entry.sourceId).toBe(`agent:${en.id}`);
   });
 
   it('adds document chunks under their own source id', () => {

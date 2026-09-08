@@ -1,4 +1,4 @@
-import type { InterviewScenario, SourceDocument } from './domain.js';
+import type { SourceDocument } from './domain.js';
 
 /**
  * Retrieval, upstream of prompt compilation.
@@ -151,11 +151,16 @@ export function chunkDocument(text: string): string[] {
  * anything about what ships.
  */
 export function buildCorpus(
-  scenario: InterviewScenario,
+  /**
+   * Whatever the agent already knows: a scenario, an agent spec, anything with
+   * an id and some notes. Structural on purpose — retrieval has no business
+   * knowing what kind of agent it is serving.
+   */
+  source: { id: string; contextNotes: readonly string[] },
   documents: readonly SourceDocument[] = [],
 ): CorpusEntry[] {
-  const entries: CorpusEntry[] = scenario.contextNotes.map((text) => ({
-    sourceId: `scenario:${scenario.id}`,
+  const entries: CorpusEntry[] = source.contextNotes.map((text) => ({
+    sourceId: `agent:${source.id}`,
     text,
   }));
   for (const document of documents) {

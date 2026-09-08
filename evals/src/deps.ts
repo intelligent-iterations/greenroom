@@ -12,6 +12,14 @@ export {
   JudgeVerdict,
   PROMPT_VERSION,
   RUBRIC,
+  SPOKEN_RUBRIC,
+  COACHING_RUBRIC,
+  LANGUAGE_LEARNING_RUBRIC,
+  SPOKEN_CHECKS,
+  IN_CHARACTER_CHECKS,
+  TURN_TAKING_CHECKS,
+  COACHING_CHECKS,
+  ALL_CHECKS,
   applicableRubric,
   SCENARIOS,
   SeniorityLevel,
@@ -28,6 +36,8 @@ export {
 } from '@greenroom/shared';
 
 export type {
+  Check,
+  RubricDimension,
   ChatMessage,
   CompiledPrompt,
   DimensionScore as Score,
