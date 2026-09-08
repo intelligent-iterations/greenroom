@@ -3,6 +3,20 @@
 The repository is **private** and stays private until the items below are done.
 This is the list, not a promise that it has been worked through.
 
+## What is left
+
+Two things block a public repository, and neither is security:
+
+1. **Community files.** No `CONTRIBUTING.md`, `SECURITY.md` or issue templates.
+   A repository asking for contributions with no way to report a vulnerability
+   is a repository that will receive one by email at the worst possible moment.
+2. **`.firebaserc` is tracked**, pointing every clone at `greenroom-ii`. It
+   should be gitignored beside its `.example`, or a `firebase use` will target
+   somebody else's project.
+
+And one that blocks a public *deployment*: nothing from the generalisation work
+has been pushed, so the live origin is an older build.
+
 ## Security review
 
 - [x] **Static analysis.** `.github/workflows/security.yml` runs CodeQL
@@ -40,18 +54,27 @@ Worth recording, because "we ran a scanner" means little without it:
   compromise.
 - **1 prototype-pollution** risk copying parsed JSON with `Object.assign`.
 - **2 format-string** issues in console logging.
-- [ ] **The `generate` endpoint** — see "Do we meter tokens?" below, which
-      reframes this. It is public-invoker by necessity (a browser has no Google
-      credentials) and gated by a Firebase ID token. If the cloud route ships,
-      confirm token verification cannot be bypassed, that the caps in
-      `GenerateBody` hold, and add a per-user rate limit. If it does not ship,
-      none of that applies.
-- [ ] **Local file handling.** `local-models.ts` reads a folder the user picks
-      and serves it to the model loader. Confirm nothing outside the selection
-      is reachable and that a malicious filename cannot escape the match.
-- [ ] **CSV import.** `parseEvalCsv` takes an arbitrary file. It never
-      evaluates content, but the results view renders model output, so confirm
-      there is no path to injection through a case's text.
+- [x] **The `generate` endpoint.** Resolved rather than deferred, because
+      "there is no key so it cannot spend" is an accident of configuration and
+      not a control. The route is now off unless *both*
+      `CLOUD_INFERENCE_ENABLED=true` on the server and `VITE_CLOUD_ENABLED=true`
+      in the build say so — a key being present is explicitly not consent, and a
+      test puts a real-looking key in the environment and asserts the endpoint
+      still refuses before it verifies a token. When it is on: a global and a
+      per-user daily ceiling counted before the vendor call and before the model
+      id is resolved, request size capped at 24,000 characters as well as count,
+      fail-closed counting, and a GCP billing budget as a backstop.
+- [x] **Local file handling.** Nothing outside the selection is reachable, and
+      the reason is structural rather than defensive: the app never touches a
+      filesystem. `files` is the array the browser's own directory picker handed
+      over, and every candidate is drawn from it, so the worst a crafted path
+      achieves is matching a file the user already offered. Traversal strings are
+      asserted inert in `local-models.test.ts`, and the cache never writes back —
+      these are the user's files, lent for a session.
+- [x] **CSV import.** No injection path. `parseEvalCsv` never evaluates content,
+      and there is no `dangerouslySetInnerHTML`, `innerHTML` or
+      `insertAdjacentHTML` anywhere in the web package — every piece of case text
+      and model output reaches the DOM as a React text node.
 
 ## Do we meter tokens?
 
@@ -77,8 +100,12 @@ proof that the `LanguageModel` interface is genuinely portable, and it means an
 operator who wants a stronger model can supply their own keys. It just does not
 need to be switched on for a public demo of on-device inference.
 
-- [ ] Decide: ship the cloud route publicly (then rate-limit it), or leave the
-      keys unset (then it is inert). Do not ship it configured and unlimited.
+- [x] **Decided: off, and off deliberately.** Leaving the keys unset was the
+      right answer and the wrong mechanism — it makes safety depend on nobody
+      setting one. The route now takes two explicit switches, and when a
+      deployment does turn it on it is metered rather than trusted. See the
+      endpoint item above and the "Three deployment postures" table in the
+      README.
 
 ## Secrets and configuration
 
@@ -111,4 +138,8 @@ single-machine measurements and that the untested areas are still listed.
 - [x] Instruments (`bench`, `evals` runner, probes) excluded from the
       production build; verified absent from the deployed origin.
 - [x] Cross-origin isolation headers verified on the live site.
-- [ ] Cloud route on the public demo — decided under "Do we meter tokens?".
+- [x] Cloud route on the public demo — off, by two switches rather than by
+      omission.
+- [ ] **Push and deploy.** Nothing from the generalisation work is live: the
+      deployed origin is still an older build. Everything below is about a
+      release that has not happened yet.
