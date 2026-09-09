@@ -150,7 +150,21 @@ export function storagePathFor(url: string): string[] {
  * on the way out.
  */
 export function createFolderCache(root: FileSystemDirectoryHandle) {
-  async function directoryFor(segments: string[], create: boolean): Promise<FileSystemDirectoryHandle | undefined> {
+  /**
+   * Suffix for a file still being written.
+   *
+   * `match` only ever reads the final name, so an interrupted write is
+   * invisible rather than corrupting. This machine kept losing processes to the
+   * OOM killer mid-download, and the first version of this happily served the
+   * truncated result on the next run — which presents as a broken model rather
+   * than as a failed download, and is much harder to diagnose.
+   */
+  const PARTIAL = '.part';
+
+  async function directoryFor(
+    segments: string[],
+    create: boolean,
+  ): Promise<FileSystemDirectoryHandle | undefined> {
     let dir = root;
     for (const segment of segments) {
       try {
@@ -171,6 +185,8 @@ export function createFolderCache(root: FileSystemDirectoryHandle) {
       if (!dir) return undefined;
       try {
         const file = await (await dir.getFileHandle(name)).getFile();
+        // A zero-byte file is a failed write from a previous run, not a model.
+        if (file.size === 0) return undefined;
         return new Response(file, {
           status: 200,
           headers: {
@@ -187,15 +203,56 @@ export function createFolderCache(root: FileSystemDirectoryHandle) {
       const path = storagePathFor(request);
       const name = path.pop();
       if (!name) return;
+
+      // Read the clone to completion rather than piping it.
+      //
+      // `clone()` tees the body, and a tee only flows while *both* branches are
+      // being read. transformers.js reads its branch after this returns, so
+      // streaming ours into a file that then errors leaves the pipe waiting on
+      // a sibling nobody is draining — a deadlock that presents as a download
+      // which simply stops. Draining to a buffer costs one copy and cannot
+      // deadlock. The bytes are already in memory at this point regardless.
+      let bytes: ArrayBuffer;
       try {
-        const dir = await directoryFor(path, true);
-        if (!dir) return;
-        const handle = await dir.getFileHandle(name, { create: true });
-        const writable = await handle.createWritable();
-        await response.clone().body?.pipeTo(writable);
+        bytes = await response.clone().arrayBuffer();
       } catch {
-        // A failed write costs a re-download next time, not this session. The
-        // model is already in memory by the point this runs.
+        return;
+      }
+      if (bytes.byteLength === 0) return;
+
+      let dir: FileSystemDirectoryHandle | undefined;
+      try {
+        dir = await directoryFor(path, true);
+        if (!dir) return;
+
+        // Written under a temporary name and renamed on success, so a crash
+        // leaves a .part that nothing reads rather than a plausible-looking
+        // fragment of a model.
+        const partial = await dir.getFileHandle(name + PARTIAL, { create: true });
+        const writable = await partial.createWritable();
+        await writable.write(new Uint8Array(bytes));
+        await writable.close();
+
+        const written = (await partial.getFile()).size;
+        const expected = Number(response.headers.get('Content-Length') ?? 0);
+        if (written === 0 || (expected > 0 && written !== expected)) {
+          await dir.removeEntry(name + PARTIAL).catch(() => {});
+          return;
+        }
+
+        const movable = partial as FileSystemFileHandle & {
+          move?: (name: string) => Promise<void>;
+        };
+        if (!movable.move) {
+          // No atomic rename available. Caching here could only produce a file
+          // that looks complete without being verifiable, so decline.
+          await dir.removeEntry(name + PARTIAL).catch(() => {});
+          return;
+        }
+        await movable.move(name);
+      } catch {
+        // Leave nothing behind that a later run could mistake for a model.
+        await dir?.removeEntry(name + PARTIAL).catch(() => {});
       }
     },
   };
