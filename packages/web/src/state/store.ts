@@ -1,3 +1,4 @@
+import type { DownloadState } from './download.js';
 import type {
   LoadProgress,
   Turn,
@@ -32,6 +33,12 @@ interface AppStore {
   /** Partial interviewer text for the live caption. */
   liveText: string;
   progress?: LoadProgress;
+  /** Aggregated, monotonic download state. See download.ts. */
+  download?: DownloadState;
+  /** A folder the user nominated for model weights, if any. */
+  modelFolder?: FileSystemDirectoryHandle;
+  modelFolderName?: string;
+  modelFolderNeedsPermission?: boolean;
   latency: LatencySample[];
   error?: string;
   /** Set when the learner opts into cloud inference for this session. */
@@ -67,6 +74,8 @@ interface AppStore {
   setGroundingText: (text: string) => void;
   setSessionState: (state: SessionState) => void;
   setProgress: (progress: LoadProgress) => void;
+  setDownload: (download: DownloadState | undefined) => void;
+  setModelFolder: (handle: FileSystemDirectoryHandle | undefined, name?: string, needsPermission?: boolean) => void;
   addTurn: (turn: Turn) => void;
   setLiveText: (text: string) => void;
   addLatency: (timings: TurnTimings) => void;
@@ -98,6 +107,9 @@ export const useAppStore = create<AppStore>((set) => ({
   setGroundingText: (groundingText) => set({ groundingText }),
   setSessionState: (sessionState) => set({ sessionState }),
   setProgress: (progress) => set({ progress }),
+  setDownload: (download) => set({ download }),
+  setModelFolder: (modelFolder, modelFolderName, modelFolderNeedsPermission) =>
+    set({ modelFolder, modelFolderName, modelFolderNeedsPermission }),
   // The live caption is replaced by the committed turn, so it clears here
   // rather than in the component — otherwise the last partial flashes again on
   // the next render before the new turn arrives.
@@ -113,6 +125,7 @@ export const useAppStore = create<AppStore>((set) => ({
       liveText: '',
       latency: [],
       progress: undefined,
+      download: undefined,
       error: undefined,
     }),
 }));

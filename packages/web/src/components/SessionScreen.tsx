@@ -2,6 +2,7 @@ import { LATENCY_BUDGET } from '@greenroom/shared';
 import { useEffect, useRef } from 'react';
 import { median, useAppStore } from '../state/store.js';
 import { DiagnosticsPanel } from './DiagnosticsPanel.js';
+import { DownloadPanel } from './DownloadPanel.js';
 import type { useSession } from '../state/useSession.js';
 
 const STATE_LABEL: Record<string, string> = {
@@ -16,7 +17,7 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 export function SessionScreen({ session }: { session: ReturnType<typeof useSession> }) {
-  const { sessionState, turns, liveText, progress, latency, error } = useAppStore();
+  const { sessionState, turns, liveText, latency, error } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Follow the conversation as it grows. Anchored to the transcript container
@@ -44,18 +45,7 @@ export function SessionScreen({ session }: { session: ReturnType<typeof useSessi
         {sessionState === 'thinking' && <span className="muted"> — one moment</span>}
       </section>
 
-      {sessionState === 'loading' && (
-        <div className="card">
-          <p>
-            Getting the models ready{progress?.stage ? ` — ${progress.stage}` : ''}
-          </p>
-          <progress value={progress?.progress ?? 0} max={1} />
-          <p className="muted small">
-            The first run downloads about 1.6 GB and keeps it. After that this takes a
-            few seconds and works offline.
-          </p>
-        </div>
-      )}
+      {sessionState === 'loading' && <DownloadPanel />}
 
       <div className="transcript" ref={scrollRef}>
         {turns.filter((t) => t.role !== 'system').length === 0 && !liveText && (

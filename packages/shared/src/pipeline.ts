@@ -25,11 +25,29 @@ export interface GenerateOptions {
 }
 
 /** Progress during model download/compile. `loaded`/`total` are bytes when known. */
+/**
+ * Which on-device stage is loading. A closed set, so the UI can hold a place
+ * for each one rather than discovering them as they arrive — a progress bar
+ * that restarts three times reads as three failures.
+ */
+export type LoadStage = 'stt' | 'llm' | 'tts';
+
 export interface LoadProgress {
-  stage: string;
-  progress: number; // 0..1
+  stage: LoadStage;
+  /** 0..1 within this stage. */
+  progress: number;
+  /** Bytes so far and expected, when the transport reports them. */
   loaded?: number;
   total?: number;
+  /** The artifact being fetched, for the detail line. */
+  file?: string;
+  /**
+   * True when the bytes came from the browser cache rather than the network.
+   *
+   * Worth distinguishing: a cached stage completes in milliseconds, and showing
+   * it race from 0 to 100% suggests a download that did not happen.
+   */
+  cached?: boolean;
 }
 
 export interface LanguageModel {

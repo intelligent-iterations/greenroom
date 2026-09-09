@@ -53,6 +53,7 @@ export class InferencePipeline {
     private llmRepo?: string,
     /** Files from a folder the user chose, consulted before the network. */
     private localFiles?: [string, File][],
+    private modelFolder?: FileSystemDirectoryHandle,
   ) {
     this.#worker = new Worker(new URL('./inference.worker.ts', import.meta.url), {
       type: 'module',
@@ -95,6 +96,7 @@ export class InferencePipeline {
         language: this.language,
         ...(this.llmRepo ? { llmRepo: this.llmRepo } : {}),
         ...(this.localFiles?.length ? { localFiles: this.localFiles } : {}),
+        ...(this.modelFolder ? { modelFolder: this.modelFolder } : {}),
       });
     });
     return this.#loadPromise;
@@ -108,7 +110,14 @@ export class InferencePipeline {
   #handle(message: WorkerResponse): void {
     switch (message.type) {
       case 'progress':
-        this.#onProgress?.({ stage: message.stage, progress: message.progress });
+        this.#onProgress?.({
+          stage: message.stage,
+          progress: message.progress,
+          ...(message.loaded !== undefined ? { loaded: message.loaded } : {}),
+          ...(message.total !== undefined ? { total: message.total } : {}),
+          ...(message.file ? { file: message.file } : {}),
+          ...(message.cached ? { cached: true } : {}),
+        });
         break;
 
       case 'ready':

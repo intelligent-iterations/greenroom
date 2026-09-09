@@ -8,6 +8,7 @@ import type { useSession } from '../state/useSession.js';
 import { DeviceReadiness } from './DeviceReadiness.js';
 import { ModelSource } from './ModelSource.js';
 import { PresetPicker } from './PresetPicker.js';
+import { ModelDestination } from './ModelDestination.js';
 
 const LEVELS: CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
@@ -18,7 +19,7 @@ export function SetupScreen({
   learner: LearnerState;
   session: ReturnType<typeof useSession>;
 }) {
-  const { setLearner, error } = useAppStore();
+  const { setLearner, error, presetId } = useAppStore();
   const [starting, setStarting] = useState(false);
 
   const ready = Boolean(session.routing?.selected);
@@ -27,6 +28,10 @@ export function SetupScreen({
     <div className="stack">
       <PresetPicker learner={learner} />
 
+      {/* Only where it changes anything. A rubber duck does not pitch its
+          register at a CEFR level, and offering the control there implies it
+          does. */}
+      {presetId.startsWith('interview:') && (
       <section className="card">
         <h2>Your language level</h2>
         <p className="muted">
@@ -46,8 +51,14 @@ export function SetupScreen({
           ))}
         </div>
       </section>
+      )}
 
       <DeviceReadiness session={session} />
+
+      <section className="card">
+        <h2>Where the models go</h2>
+        <ModelDestination />
+      </section>
 
       <ModelSource />
 
@@ -63,7 +74,7 @@ export function SetupScreen({
           setStarting(false);
         }}
       >
-        {starting ? 'Loading models…' : 'Start the interview'}
+        {starting ? 'Getting the models' : 'Start talking'}
       </button>
       <p className="muted small">
         <button type="button" className="link" onClick={() => useAppStore.getState().setPhase('evals')}>
@@ -72,7 +83,9 @@ export function SetupScreen({
         against whichever model you pick.
       </p>
       <p className="muted small">
-        The first run downloads about 1.2 GB of models and caches them. After that it works offline.
+        {session.routing?.selected
+          ? `First run downloads about ${(((session.routing.selected.downloadMb ?? 0) + 586) / 1000).toFixed(1)} GB and keeps it. After that it works offline.`
+          : 'The first run downloads the models and keeps them. After that it works offline.'}
       </p>
     </div>
   );

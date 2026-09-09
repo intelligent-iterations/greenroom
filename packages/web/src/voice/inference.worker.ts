@@ -28,12 +28,20 @@ import {
   type PreTrainedTokenizer,
 } from '@huggingface/transformers';
 import { createLocalCache } from './local-models.js';
+import { createFolderCache } from './model-store.js';
 import { env } from '@huggingface/transformers';
 import { findStage } from './model-manifest.js';
 import type { ChatMessage } from '@greenroom/shared';
 
 export type WorkerRequest =
-  | { type: 'load'; language: 'en' | 'fr'; llmRepo?: string; localFiles?: [string, File][] }
+  | {
+      type: 'load';
+      language: 'en' | 'fr';
+      llmRepo?: string;
+      localFiles?: [string, File][];
+      /** A folder the user nominated. Read first, and written to as files arrive. */
+      modelFolder?: FileSystemDirectoryHandle;
+    }
   | { type: 'warmUp'; systemPrompt: string }
   | { type: 'transcribe'; id: number; audio: Float32Array }
   | { type: 'generate'; id: number; messages: ChatMessage[]; maxTokens: number; temperature: number }
@@ -42,7 +50,15 @@ export type WorkerRequest =
   | { type: 'resetCache' };
 
 export type WorkerResponse =
-  | { type: 'progress'; stage: string; progress: number }
+  | {
+      type: 'progress';
+      stage: 'stt' | 'llm' | 'tts';
+      progress: number;
+      loaded?: number;
+      total?: number;
+      file?: string;
+      cached?: boolean;
+    }
   | { type: 'ready' }
   | { type: 'warmedUp' }
   | { type: 'transcript'; id: number; text: string }
@@ -68,17 +84,49 @@ const worker = self as unknown as DedicatedWorkerGlobalScope;
 const post = (message: WorkerResponse, transfer?: Transferable[]) =>
   transfer ? worker.postMessage(message, transfer) : worker.postMessage(message);
 
-/** The progress union includes states with no `progress` field. */
-const progressOf = (info: unknown): number =>
-  typeof info === 'object' && info !== null && 'progress' in info &&
-  typeof (info as { progress: unknown }).progress === 'number'
-    ? (info as { progress: number }).progress / 100
-    : 0;
+/**
+ * transformers.js reports a union: 'initiate', 'download', 'progress', 'done'.
+ * Only 'progress' carries bytes, and only 'download' means the network was
+ * actually used — a file served from the cache goes straight to 'done'. Both
+ * facts are worth keeping, so this maps the union rather than reducing it to a
+ * number the way it used to.
+ */
+type HfProgress = {
+  status?: string;
+  file?: string;
+  progress?: number;
+  loaded?: number;
+  total?: number;
+};
 
-async function load(llmRepo?: string, localFiles?: [string, File][]): Promise<void> {
-  // Files the user pointed us at answer before the network does. Partial
-  // folders are fine: anything absent falls through and is downloaded.
-  if (localFiles?.length) {
+function report(stage: 'stt' | 'llm' | 'tts', info: unknown): void {
+  const p = (typeof info === 'object' && info !== null ? info : {}) as HfProgress;
+  post({
+    type: 'progress',
+    stage,
+    progress: typeof p.progress === 'number' ? p.progress / 100 : p.status === 'done' ? 1 : 0,
+    ...(typeof p.loaded === 'number' ? { loaded: p.loaded } : {}),
+    ...(typeof p.total === 'number' ? { total: p.total } : {}),
+    ...(p.file ? { file: p.file } : {}),
+    // 'done' without ever having seen 'download' is a cache hit.
+    ...(p.status === 'done' && p.loaded === undefined ? { cached: true } : {}),
+  });
+}
+
+async function load(
+  llmRepo?: string,
+  localFiles?: [string, File][],
+  modelFolder?: FileSystemDirectoryHandle,
+): Promise<void> {
+  // Both hooks answer before the network, and only one can be installed, so
+  // the writable folder wins where there is one: it can serve the same files
+  // AND keep whatever it had to fetch, which the read-only source cannot.
+  // Partial folders are fine either way — anything absent falls through and is
+  // downloaded.
+  if (modelFolder) {
+    env.useCustomCache = true;
+    env.customCache = createFolderCache(modelFolder);
+  } else if (localFiles?.length) {
     env.useCustomCache = true;
     env.customCache = createLocalCache(new Map(localFiles));
   }
@@ -87,17 +135,17 @@ async function load(llmRepo?: string, localFiles?: [string, File][]): Promise<vo
   const llmSpec = findStage('llm');
   const ttsSpec = findStage('tts');
 
-  post({ type: 'progress', stage: 'speech recognition', progress: 0 });
+  post({ type: 'progress', stage: 'stt', progress: 0 });
   recognizer = (await pipeline('automatic-speech-recognition', stt.repo, {
     device: 'webgpu',
     dtype: stt.modules.webgpu as Record<string, 'fp32'>,
     progress_callback: (info) =>
-      post({ type: 'progress', stage: 'speech recognition', progress: progressOf(info) }),
+      report('stt', info),
   })) as AutomaticSpeechRecognitionPipeline;
   // Compile shaders now rather than on the learner's first answer.
   await recognizer(new Float32Array(16_000), { language });
 
-  post({ type: 'progress', stage: 'interviewer', progress: 0 });
+  post({ type: 'progress', stage: 'llm', progress: 0 });
   // The learner picks a model from the catalogue; the manifest entry is the
   // default. Everything else about the stage is identical.
   const repo = llmRepo ?? llmSpec.repo;
@@ -106,14 +154,14 @@ async function load(llmRepo?: string, localFiles?: [string, File][]): Promise<vo
     dtype: (llmSpec.modules.webgpu['model'] ?? 'q4f16') as 'q4f16',
     device: 'webgpu',
     progress_callback: (info) =>
-      post({ type: 'progress', stage: 'interviewer', progress: progressOf(info) }),
+      report('llm', info),
   });
 
-  post({ type: 'progress', stage: 'voice', progress: 0 });
+  post({ type: 'progress', stage: 'tts', progress: 0 });
   tts = await KokoroTTS.from_pretrained(ttsSpec.repo, {
     device: 'webgpu',
     dtype: (ttsSpec.modules.webgpu['model'] ?? 'fp32') as 'fp32',
-    progress_callback: (info) => post({ type: 'progress', stage: 'voice', progress: progressOf(info) }),
+    progress_callback: (info) => report('tts', info),
   });
 
   post({ type: 'ready' });
@@ -176,7 +224,7 @@ worker.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       switch (request.type) {
         case 'load':
           language = request.language;
-          await load(request.llmRepo, request.localFiles);
+          await load(request.llmRepo, request.localFiles, request.modelFolder);
           break;
 
         case 'warmUp':

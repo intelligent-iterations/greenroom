@@ -585,3 +585,164 @@ progress {
   border-color: #b04a4a;
   background: color-mix(in srgb, #b04a4a 8%, transparent);
 }
+
+/*
+ * The download.
+ *
+ * This is the first thing anyone experiences and it used to be a single bar
+ * that went backwards twice. It gets the one piece of emphasis on the screen:
+ * a list where every stage holds its place, so progress reads as work being
+ * completed rather than restarted.
+ *
+ * Figures are tabular. A byte counter whose digits change width is motion the
+ * eye tracks, and there is already enough waiting happening.
+ */
+.download {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1.25rem;
+}
+
+.download__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.download__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.download__figures {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.download__overall {
+  block-size: 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.download__fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent);
+  /* Only ever grows, so the transition never reads as a correction. */
+  transition: inline-size 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.download__stages {
+  list-style: none;
+  margin: 1.1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.stage {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.stage--active {
+  color: var(--text);
+}
+
+.stage__name {
+  white-space: nowrap;
+}
+
+.stage__track {
+  block-size: 0.2rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.stage__fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent-dim);
+  transition: inline-size 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stage--active .stage__fill {
+  background: var(--accent);
+}
+
+.stage--done .stage__fill {
+  background: var(--accent-dim);
+  inline-size: 100% !important;
+}
+
+.stage__note {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 34rem) {
+  .stage {
+    grid-template-columns: 1fr auto;
+  }
+  .stage__track {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download__fill,
+  .stage__fill {
+    transition: none;
+  }
+}
+
+/* Where the weights live. */
+.destination__current {
+  margin: 0 0 0.6rem;
+}
+
+.destination__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+/* A second-rank action: real, but not the thing on the screen to press. */
+.secondary {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--accent-dim);
+}
+
+.secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

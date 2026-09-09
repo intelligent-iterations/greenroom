@@ -21,6 +21,7 @@ import { detectCapabilities, type DeviceCapabilities } from '../voice/capabiliti
 import { MODEL_CATALOGUE } from '../voice/models.js';
 import { InterviewSession } from '../voice/session.js';
 import { useAppStore } from './store.js';
+import { initialDownloadState, reduceProgress } from './download.js';
 
 /**
  * Wires an InterviewSession into React.
@@ -117,6 +118,19 @@ export function useSession() {
         preset.language,
         onDevice ? (app.customModelRepo ?? selected.id) : undefined,
         app.localModelFiles,
+        app.modelFolder,
+      );
+
+      // Seed the download list before anything is fetched, so every stage has a
+      // place from the first frame instead of appearing one at a time. The
+      // language model figure is the one that actually varies; the other two
+      // are fixed by the manifest.
+      store.setDownload(
+        initialDownloadState({
+          stt: 276e6,
+          llm: (selected.downloadMb ?? 1057) * 1e6,
+          tts: 310e6,
+        }),
       );
 
       // Even on the cloud route, recognition and the voice stay on this device.
@@ -181,7 +195,11 @@ export function useSession() {
       session.on('turn', store.addTurn);
       session.on('interviewerDelta', store.setLiveText);
       session.on('timings', store.addLatency);
-      session.on('progress', store.setProgress);
+      session.on('progress', (p) => {
+        store.setProgress(p);
+        const previous = useAppStore.getState().download;
+        if (previous) store.setDownload(reduceProgress(previous, p, performance.now()));
+      });
       session.on('error', (err) => store.setError(err.message));
 
       sessionRef.current = session;
