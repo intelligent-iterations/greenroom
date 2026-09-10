@@ -1,9 +1,7 @@
-import { NON_LLM_STAGE_VRAM_MB } from '@greenroom/shared';
 import { useAppStore } from '../state/store.js';
 import { cloudInferenceOffered } from '../data/deployment.js';
 import { assessReadiness } from '../voice/readiness.js';
 import type { useSession } from '../state/useSession.js';
-import { MODEL_CATALOGUE } from '../voice/models.js';
 
 /**
  * Explains what will run where, before anything downloads.
@@ -16,7 +14,7 @@ import { MODEL_CATALOGUE } from '../voice/models.js';
  */
 export function DeviceReadiness({ session }: { session: ReturnType<typeof useSession> }) {
   const { capabilities, routing } = session;
-  const { allowCloud, setAllowCloud, modelId, setModelId } = useAppStore();
+  const { allowCloud, setAllowCloud } = useAppStore();
 
   if (!capabilities) return <section className="card">Checking this device…</section>;
 
@@ -24,14 +22,6 @@ export function DeviceReadiness({ session }: { session: ReturnType<typeof useSes
 
   const selected = routing?.selected;
   const onDevice = selected?.residency === 'device';
-
-  // What is left for the interviewer after the recogniser and voice take theirs.
-  const budgetMb =
-    capabilities.maxBufferMb === undefined
-      ? undefined
-      : Math.max(0, capabilities.maxBufferMb - NON_LLM_STAGE_VRAM_MB);
-
-  const onDeviceModels = MODEL_CATALOGUE.filter((m) => m.vendor === 'on-device');
 
   return (
     <section className="card">
@@ -47,63 +37,16 @@ export function DeviceReadiness({ session }: { session: ReturnType<typeof useSes
           <dd>{capabilities.hasSharedArrayBuffer ? `Yes, ${capabilities.threads} threads` : 'Single-threaded'}</dd>
         </div>
         <div>
-          <dt>Running the interviewer</dt>
+          <dt>Answering</dt>
           <dd>{selected ? selected.label : 'No eligible model'}</dd>
         </div>
       </dl>
 
       <p className={onDevice ? 'badge badge--good' : 'badge badge--warn'}>
         {onDevice
-          ? 'Your microphone audio and answers stay on this device.'
-          : 'Your answers will be sent to a cloud model for this session.'}
+          ? 'Your microphone audio and what you say stay on this device.'
+          : 'What you say will be sent to a cloud model for this session.'}
       </p>
-
-      <fieldset className="models">
-        <legend>Interviewer model</legend>
-        <p className="muted small">
-          Bigger models stay in character better and take longer to download. Anything
-          your machine cannot hold is shown but not selectable.
-        </p>
-
-        <label className="model">
-          <input
-            type="radio"
-            name="model"
-            checked={!modelId}
-            onChange={() => setModelId(undefined)}
-          />
-          <span>
-            <strong>Choose for me</strong>
-            <span className="muted small"> — best that fits this machine</span>
-          </span>
-        </label>
-
-        {onDeviceModels.map((model) => {
-          // Judged against the memory left after the other stages, not total,
-          // because all three models share one GPU.
-          const fits = budgetMb === undefined || (model.vramMb ?? 0) <= budgetMb;
-          return (
-            <label key={model.id} className={`model ${fits ? '' : 'model--unavailable'}`}>
-              <input
-                type="radio"
-                name="model"
-                disabled={!fits}
-                checked={modelId === model.id}
-                onChange={() => setModelId(model.id)}
-              />
-              <span>
-                <strong>{model.label}</strong>
-                <span className="muted small">
-                  {' '}
-                  — {model.downloadMb} MB download
-                  {fits ? '' : ' · too large for this device'}
-                </span>
-                <span className="muted small model__note">{model.suitedTo}</span>
-              </span>
-            </label>
-          );
-        })}
-      </fieldset>
 
       {readiness.level !== 'full' && (
         <div className={`notice notice--${readiness.level}`} role="status">
@@ -128,7 +71,7 @@ export function DeviceReadiness({ session }: { session: ReturnType<typeof useSes
             onChange={(e) => setAllowCloud(e.target.checked)}
           />
           <span>
-            Allow cloud inference for a stronger interviewer
+            Allow cloud inference for a stronger model
             <span className="muted small"> — needed if this device has no WebGPU</span>
           </span>
         </label>

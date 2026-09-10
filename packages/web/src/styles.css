@@ -746,3 +746,128 @@ progress {
   opacity: 0.55;
   cursor: default;
 }
+
+/* Navigation ---------------------------------------------------------------
+   Two destinations, sitting on the rule that separates the header from the
+   content it switches. Underline rather than a pill: the tabs are part of the
+   page's structure, not buttons floating on it. */
+.nav {
+  margin: -1rem 0 1.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.nav__list {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav__tab {
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.nav__tab:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.nav__tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.nav__tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nav__lock {
+  margin: 0;
+  padding: 0.4rem 0.9rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Model picker -------------------------------------------------------------
+   A ladder of options, heaviest first. The metadata row is the point: a name
+   alone gives nobody enough to choose with. */
+.picker {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker__row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.picker__row:hover {
+  border-color: var(--accent-dim);
+}
+
+.picker__row--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.picker__row--unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.picker__row--unavailable:hover {
+  border-color: var(--line);
+}
+
+.picker__row input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.picker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.picker__name {
+  font-weight: 600;
+}
+
+/* Tabular numerals so the sizes line up down the column and can be compared
+   at a glance rather than read one at a time. */
+.picker__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.picker__note {
+  margin-top: 0.15rem;
+}
+
+.picker__blocked {
+  margin-top: 0.3rem;
+  color: var(--warn);
+}

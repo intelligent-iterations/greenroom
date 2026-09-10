@@ -25,6 +25,13 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# The token this workflow hands to every third-party action. Declared read-only
+# rather than inherited: the repository default can be read-write, and on a
+# public repo that turns any compromised build-step dependency into push
+# access. Nothing here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Verify

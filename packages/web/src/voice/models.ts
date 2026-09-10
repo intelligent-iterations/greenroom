@@ -6,8 +6,8 @@ import type { ModelDescriptor } from '@greenroom/shared';
  * Several on-device options rather than one, because the right model is a
  * property of the machine as much as of the product: a 260MB model is the
  * difference between working and not on a thin laptop, and a 2.7GB one is the
- * difference between a convincing interviewer and a weak one on a workstation.
- * The router filters by what fits; the learner picks among what is left.
+ * difference between a convincing agent and a weak one on a workstation.
+ * The router filters by what fits; the person picks among what is left.
  *
  * Every id is a Hugging Face repository loaded by transformers.js, and every
  * `downloadMb` is measured from the published file sizes — summed across
@@ -22,8 +22,8 @@ import type { ModelDescriptor } from '@greenroom/shared';
  */
 export const MODEL_CATALOGUE: ModelDescriptor[] = [
   {
-    // Default. Measured, and the smallest that holds an interviewer persona at
-    // all — the evals put it at 0.73 clean on the interviewer checks.
+    // Default. Measured, and the smallest that holds a persona at
+    // all — the evals put it at 0.73 clean on the in-character checks.
     id: 'HuggingFaceTB/SmolLM2-1.7B-Instruct',
     vendor: 'on-device',
     label: 'Balanced — SmolLM2 1.7B',
@@ -43,7 +43,7 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     id: 'onnx-community/Qwen3-4B-ONNX',
     vendor: 'on-device',
     label: 'Best — Qwen3 4B',
-    suitedTo: 'The most capable interviewer that runs locally. Large download.',
+    suitedTo: 'The most capable model that runs locally. Large download.',
     residency: 'device',
     firstTokenMsP50: 1900,
     qualityScore: 0.8,
@@ -54,12 +54,12 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     downloadMb: 2702,
   },
   {
-    // The floor. Genuinely weak as an interviewer, and still the difference
+    // The floor. Genuinely weak, and still the difference
     // between practising and not on a constrained machine or a slow connection.
     id: 'HuggingFaceTB/SmolLM2-360M-Instruct',
     vendor: 'on-device',
     label: 'Light — SmolLM2 360M',
-    suitedTo: 'Small download, modest hardware. The interviewer is noticeably weaker.',
+    suitedTo: 'Small download, modest hardware. Noticeably weaker at staying in character.',
     residency: 'device',
     firstTokenMsP50: 400,
     qualityScore: 0.3,
@@ -73,7 +73,7 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     id: 'azure-gpt-4o-mini',
     vendor: 'azure-openai',
     label: 'Azure OpenAI (Canada Central)',
-    suitedTo: 'Strongest interviewer. Your answers leave the device.',
+    suitedTo: 'Strongest option. What you say leaves the device.',
     residency: 'ca-region',
     firstTokenMsP50: 610,
     qualityScore: 0.86,
@@ -84,7 +84,7 @@ export const MODEL_CATALOGUE: ModelDescriptor[] = [
     id: 'gemini-3-flash',
     vendor: 'google-gemini',
     label: 'Google Gemini Flash',
-    suitedTo: 'Strongest interviewer. Your answers leave the device.',
+    suitedTo: 'Strongest option. What you say leaves the device.',
     residency: 'us-region',
     firstTokenMsP50: 380,
     qualityScore: 0.88,

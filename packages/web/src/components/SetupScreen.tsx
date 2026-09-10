@@ -9,6 +9,7 @@ import { DeviceReadiness } from './DeviceReadiness.js';
 import { ModelSource } from './ModelSource.js';
 import { PresetPicker } from './PresetPicker.js';
 import { ModelDestination } from './ModelDestination.js';
+import { ModelPicker } from './ModelPicker.js';
 
 const LEVELS: CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
@@ -54,6 +55,8 @@ export function SetupScreen({
       )}
 
       <DeviceReadiness session={session} />
+
+      {session.capabilities && <ModelPicker capabilities={session.capabilities} />}
 
       <section className="card">
         <h2>Where the models go</h2>

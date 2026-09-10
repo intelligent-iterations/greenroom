@@ -1,0 +1,41 @@
+# Dependency updates.
+#
+# Two ecosystems, because they fail differently. A stale npm dependency shows up
+# in `pnpm audit`, which the Security workflow already runs — so that lane has a
+# detector and this is the fix arriving on its own. Stale *actions* have no such
+# detector: every action here is pinned to a commit SHA (which is the right
+# call — a tag is mutable and a compromised tag is the documented way CI gets
+# owned), and the cost of pinning is that a SHA never updates itself and no
+# audit will ever mention it. Dependabot is what keeps pinning from quietly
+# becoming rot.
+#
+# Weekly, grouped, so this produces one reviewable pull request rather than a
+# stream of individually-plausible ones — the volume is what makes people stop
+# reading supply-chain diffs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: 'ci'
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # The whole workspace is one lockfile, so one update lane covers every
+    # package. Majors are left out of the group: they need reading, and burying
+    # a breaking change among twelve patch bumps is how it ships unread.
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    commit-message:
+      prefix: 'deps'

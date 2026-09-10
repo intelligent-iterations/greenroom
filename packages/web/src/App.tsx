@@ -4,6 +4,7 @@ import { DebriefScreen } from './components/DebriefScreen.js';
 import { EvalsScreen } from './components/EvalsScreen.js';
 import { SessionScreen } from './components/SessionScreen.js';
 import { SetupScreen } from './components/SetupScreen.js';
+import { Nav } from './components/Nav.js';
 import { loadLearnerState } from './state/learner.js';
 import { useAppStore } from './state/store.js';
 import { useSession } from './state/useSession.js';
@@ -29,6 +30,13 @@ export function App() {
         </p>
         {phase === 'setup' && <AccountBar />}
       </header>
+
+      {/* Rendered outside <main> so it is a sibling of the content it switches,
+          not part of it. */}
+      <Nav
+        phase={phase}
+        onNavigate={(to) => setPhase(to === 'evals' ? 'evals' : 'setup')}
+      />
 
       <main>
         {!learner ? (
