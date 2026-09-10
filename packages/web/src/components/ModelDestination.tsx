@@ -7,6 +7,7 @@ import {
   restoreModelFolder,
   supportsModelFolder,
 } from '../voice/model-store.js';
+import { StorageNotice } from './StorageNotice.js';
 
 /**
  * Where the weights go.
@@ -20,7 +21,7 @@ import {
  * then legible, shareable with other tools, backed up with everything else, and
  * read straight off disk on every later run.
  */
-export function ModelDestination() {
+export function ModelDestination({ neededMb }: { neededMb: number }) {
   const { modelFolder, modelFolderName, modelFolderNeedsPermission, setModelFolder } = useAppStore();
   const [busy, setBusy] = useState(false);
   const supported = supportsModelFolder();
@@ -104,6 +105,9 @@ export function ModelDestination() {
         Browser storage can be cleared when the machine is short of space. A folder you pick
         keeps the weights where you can see them, and every later run loads from it.
       </p>
+      {/* Only on this branch: a folder on disk is a real file, so eviction is
+          not a risk worth raising there. */}
+      <StorageNotice neededMb={neededMb} />
     </div>
   );
 }

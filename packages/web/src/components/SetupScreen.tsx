@@ -57,7 +57,7 @@ export function SetupScreen({
 
       <section className="card">
         <h2>Where the models go</h2>
-        <ModelDestination />
+        <ModelDestination neededMb={(session.routing?.selected?.downloadMb ?? 0) + 586} />
       </section>
 
       <ModelSource />
