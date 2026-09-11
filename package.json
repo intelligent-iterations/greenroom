@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/intelligent-iterations/ii-realtime-local-voice-llm-playground.git"
+    "url": "git+https://github.com/intelligent-iterations/greenroom.git"
   },
-  "homepage": "https://github.com/intelligent-iterations/ii-realtime-local-voice-llm-playground#readme",
+  "homepage": "https://github.com/intelligent-iterations/greenroom#readme",
   "bugs": {
-    "url": "https://github.com/intelligent-iterations/ii-realtime-local-voice-llm-playground/issues"
+    "url": "https://github.com/intelligent-iterations/greenroom/issues"
   },
   "keywords": [
     "voice-ai",

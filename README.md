@@ -117,7 +117,7 @@ constraint rather than a proxy for one.
 Other useful commands:
 
 ```bash
-pnpm test         # 357 unit tests across five packages
+pnpm test         # 398 unit tests across five packages
 pnpm typecheck    # every package
 pnpm eval         # run the evaluation harness offline
 pnpm eval:gate    # the same run, as a pass/fail quality gate
@@ -592,7 +592,7 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
 
 **Verified — I ran this:**
 
-- 357 unit tests across five packages, including the pipeline concurrency:
+- 398 unit tests across five packages, including the pipeline concurrency:
   barge-in aborts generation and stops audio, the echo guard rejects
   self-interruption inside the window, sentence chunks are spoken while the
   model is still generating, a truncated turn records what was *heard* rather
@@ -618,6 +618,14 @@ ongoing conversation replies in about 1.2 s. Full detail and method in
   wrong — `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: credentialless` present in production, matching
   the dev server.
+
+  **What is deployed is not what is in this repository.** The live build is from
+  6 September and is 29 commits behind `main`; deployment is a manual workflow
+  and has not been run since. Most of the gap is cosmetic, but one part is not:
+  the deployed build predates the storage work, so it neither requests
+  persistent storage nor warns when the browser has no room, which is the bug
+  that made a 1.6 GB download repeat on every visit. Read the live site as a
+  snapshot of that date, not as this code running.
 
 - **The evaluation harness has scored a live model.** 21 cases, all 21
   rubric-scored by an LLM judge, no errors and no critical failures, composite
