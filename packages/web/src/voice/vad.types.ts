@@ -11,6 +11,19 @@ export interface VadHandlers {
   onSpeechEnd: (audio: Float32Array) => void;
   /** Speech too short to be real — a cough, a door. Never starts a turn. */
   onMisfire?: () => void;
+  /**
+   * Speech probability has just dropped — the learner may have finished, and
+   * the redemption countdown has begun.
+   *
+   * Fires up to `redemptionMs` before `onSpeechEnd`, carrying the speech
+   * captured so far. It is a *guess*: the learner may simply be drawing breath,
+   * in which case `onSpeechResumed` follows and this should be discarded. Its
+   * purpose is to let transcription start during the endpoint wait instead of
+   * after it — see speculative-stt.ts.
+   */
+  onSilenceOnset?: (audio: Float32Array) => void;
+  /** Speech came back before the endpoint confirmed. Any guess is now void. */
+  onSpeechResumed?: () => void;
 }
 
 /**

@@ -28,10 +28,42 @@ export type { VadController, VadHandlers, VadOptions } from './vad.types.js';
 /** Must match the output directory of scripts/copy-vad-assets.mjs. */
 export const VAD_ASSET_PATH = '/vad/';
 
+/**
+ * Longest utterance whose frames are buffered for speculation, in seconds.
+ *
+ * The buffer exists only to hand a speculative transcriber the speech so far.
+ * Past this the buffer stops growing and speculation is skipped for the turn —
+ * a monologue is exactly where an unbounded Float32Array accumulation would
+ * quietly become a memory problem, and the fallback is the old sequential path,
+ * which is merely slower rather than broken.
+ */
+const MAX_BUFFERED_SECONDS = 30;
+
+/**
+ * Rolling pre-speech buffer, in ms. Must match `preSpeechPadMs` below.
+ *
+ * Silero fires `onSpeechStart` a beat after speech actually begins, which is
+ * why the library pads the audio it finally emits. A speculative buffer that
+ * started at the callback would be missing that pad, so Whisper would see a
+ * clipped first word and speculate a transcript subtly different from the real
+ * one — the worst kind of wrong, because it would usually be nearly right.
+ */
+const PRE_SPEECH_PAD_MS = 250;
+
 export class VoiceActivityDetector implements VadController {
   #vad?: MicVAD;
   #stream?: MediaStream;
   #running = false;
+  /** Frames captured since the current speech segment began, pad included. */
+  #frames: Float32Array[] = [];
+  /** Rolling pre-speech frames, kept whether or not anyone is speaking. */
+  #preRoll: Float32Array[] = [];
+  #preRollSamples = 0;
+  #bufferedSamples = 0;
+  #speaking = false;
+  /** True once silence onset has been reported for this segment. */
+  #silenceReported = false;
+  #overflowed = false;
 
   async start(handlers: VadHandlers, options: VadOptions = {}): Promise<void> {
     if (this.#vad) return;
@@ -75,11 +107,67 @@ export class VoiceActivityDetector implements VadController {
       model: 'v5',
       onSpeechStart: () => {
         logEvent('vad.raw.speechStart');
+        // Seed with the pre-roll so the speculative audio carries the same
+        // leading pad the library will include in onSpeechEnd.
+        const preRoll = this.#preRoll.slice();
+        const preRollSamples = this.#preRollSamples;
+        this.#resetSegment();
+        this.#frames = preRoll;
+        this.#bufferedSamples = preRollSamples;
+        this.#speaking = true;
         handlers.onSpeechStart();
       },
       onSpeechEnd: (audio) => {
         logEvent('vad.raw.speechEnd', { seconds: +(audio.length / 16000).toFixed(2) });
+        this.#resetSegment();
         handlers.onSpeechEnd(audio);
+      },
+
+      /**
+       * Frame-level probabilities, used only to find the moment speech stops.
+       *
+       * The library reports the *endpoint* after `redemptionMs` of silence, by
+       * which time the learner has already been quiet for most of a second. That
+       * delay is unavoidable — it is what stops a mid-sentence breath ending the
+       * turn — but it does not have to be idle. This reports the drop as it
+       * happens so transcription can overlap the wait.
+       */
+      onFrameProcessed: (probabilities, frame) => {
+        if (!this.#speaking) {
+          // Keep just enough history to reconstruct the pad when speech starts.
+          this.#preRoll.push(frame);
+          this.#preRollSamples += frame.length;
+          while (this.#preRollSamples > (PRE_SPEECH_PAD_MS / 1000) * 16_000) {
+            const dropped = this.#preRoll.shift();
+            if (!dropped) break;
+            this.#preRollSamples -= dropped.length;
+          }
+          return;
+        }
+
+        if (this.#bufferedSamples < MAX_BUFFERED_SECONDS * 16_000) {
+          this.#frames.push(frame);
+          this.#bufferedSamples += frame.length;
+        } else if (!this.#overflowed) {
+          this.#overflowed = true;
+          logEvent('vad.buffer.overflow', { seconds: MAX_BUFFERED_SECONDS });
+        }
+
+        const speaking = probabilities.isSpeech >= 0.4;
+
+        if (!speaking && !this.#silenceReported) {
+          this.#silenceReported = true;
+          if (this.#overflowed) return;
+          logEvent('vad.silenceOnset', {
+            seconds: +(this.#bufferedSamples / 16_000).toFixed(2),
+          });
+          handlers.onSilenceOnset?.(this.#concatFrames());
+        } else if (speaking && this.#silenceReported) {
+          // A breath, not an ending.
+          this.#silenceReported = false;
+          logEvent('vad.speechResumed');
+          handlers.onSpeechResumed?.();
+        }
       },
       onVADMisfire: () => {
         // Speech too short to count. If the learner says something brief and
@@ -93,7 +181,7 @@ export class VoiceActivityDetector implements VadController {
       negativeSpeechThreshold: 0.4,
       redemptionMs: options.redemptionMs ?? 800,
       minSpeechMs: options.minSpeechMs ?? 150,
-      preSpeechPadMs: 250,
+      preSpeechPadMs: PRE_SPEECH_PAD_MS,
       // A pause mid-utterance should discard it, not submit a half sentence
       // that Whisper will turn into a confident-sounding fragment.
       submitUserSpeechOnPause: false,
@@ -103,6 +191,26 @@ export class VoiceActivityDetector implements VadController {
     await this.#vad.start();
     this.#running = true;
     logEvent('vad.started');
+  }
+
+  #resetSegment(): void {
+    this.#frames = [];
+    this.#bufferedSamples = 0;
+    this.#preRoll = [];
+    this.#preRollSamples = 0;
+    this.#speaking = false;
+    this.#silenceReported = false;
+    this.#overflowed = false;
+  }
+
+  #concatFrames(): Float32Array {
+    const out = new Float32Array(this.#bufferedSamples);
+    let at = 0;
+    for (const f of this.#frames) {
+      out.set(f, at);
+      at += f.length;
+    }
+    return out;
   }
 
   /** Stops emitting without releasing the mic. Used between sessions. */

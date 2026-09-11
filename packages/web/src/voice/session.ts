@@ -20,6 +20,7 @@ import {
   type PromptStyle,
 } from '@greenroom/shared/interview';
 import { logEvent } from './diagnostics.js';
+import { SpeculativeTranscriber, toleranceFor } from './speculative-stt.js';
 import { Emitter } from './emitter.js';
 import type { VadController } from './vad.types.js';
 
@@ -97,6 +98,17 @@ export interface SessionConfig {
 export const BARGE_IN_GUARD_MS = 400;
 
 /**
+ * Silence tolerated before the turn is considered over.
+ *
+ * Declared here rather than left to the VAD's own default because the
+ * speculative transcriber's tolerance is derived from it. Two copies of this
+ * number that can drift apart is the failure `checks.ts` names: the VAD would
+ * wait longer than the transcriber expects, and every speculation would be
+ * thrown away as if the learner had carried on speaking.
+ */
+export const VAD_REDEMPTION_MS = 800;
+
+/**
  * Orchestrates one spoken interview.
  *
  * Owns the cascade — VAD -> STT -> LLM -> TTS — and the two things that make a
@@ -119,6 +131,14 @@ export class InterviewSession extends Emitter<SessionEvents> {
   #stages: SessionStages;
   #learner: LearnerState;
   #vad?: VadController;
+  /**
+   * Transcription that overlaps the endpoint wait.
+   *
+   * Constructed alongside the VAD because its tolerance is derived from the
+   * same redemption window the VAD is configured with — the two numbers have to
+   * agree or every speculation is discarded as if the learner had kept talking.
+   */
+  #speculator?: SpeculativeTranscriber;
   #state: SessionState = 'idle';
   #turns: Turn[] = [];
   #retriever?: Retriever;
@@ -213,6 +233,14 @@ export class InterviewSession extends Emitter<SessionEvents> {
         this.#vad = new VoiceActivityDetector();
       }
 
+      // Left undefined when a test supplies its own VAD without the silence
+      // hooks: `#handleSpeechEnd` then takes the plain sequential path, which is
+      // the behaviour every existing session test was written against.
+      this.#speculator = new SpeculativeTranscriber(
+        this.#stages.recognizer,
+        toleranceFor(VAD_REDEMPTION_MS),
+      );
+
       // Compile shaders and prefill a realistic prompt while the learner is
       // still looking at the loading screen. Without this the cost lands on the
       // opening question — the first thing they ever hear from the product.
@@ -221,7 +249,11 @@ export class InterviewSession extends Emitter<SessionEvents> {
       await this.#vad.start({
         onSpeechStart: () => this.#handleSpeechStart(),
         onSpeechEnd: (audio) => void this.#handleSpeechEnd(audio),
-      });
+        // Transcribe during the endpoint wait rather than after it. Both of
+        // these are guesses about whether the turn is over; `claim` decides.
+        onSilenceOnset: (audio) => this.#speculator?.speculate(audio),
+        onSpeechResumed: () => this.#speculator?.abandon('speech resumed'),
+      }, { redemptionMs: VAD_REDEMPTION_MS });
 
       await this.#runInterviewerTurn();
     } catch (err) {
@@ -267,7 +299,13 @@ export class InterviewSession extends Emitter<SessionEvents> {
     this.#setState('transcribing');
 
     try {
-      const result = await this.#stages.recognizer.transcribe(audio, 16_000);
+      const result = this.#speculator
+        ? await this.#speculator.claim(audio)
+        : {
+            ...(await this.#stages.recognizer.transcribe(audio, 16_000)),
+            source: 'full' as const,
+            waitedMs: performance.now() - speechEndedAt,
+          };
       this.#timings.sttMs = performance.now() - speechEndedAt;
 
       // Whisper hallucinates stock phrases ("Thank you.", "Bye.") on near-silent
@@ -275,6 +313,9 @@ export class InterviewSession extends Emitter<SessionEvents> {
       // occasionally; not dropping them derails the interview constantly.
       logEvent('stt.transcript', {
         ms: Math.round(this.#timings.sttMs ?? 0),
+        // How the turn was served. `speculative` with a low sttMs is the
+        // overlap working; `full` means it fell back to the sequential path.
+        source: result.source,
         text: result.text,
       });
 
