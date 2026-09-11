@@ -17,6 +17,12 @@ permissions:
   contents: read
 
 jobs:
+  # CodeQL needs GitHub Code Security, which is free on public repositories and
+  # a paid add-on on private ones. While this repository is private the job
+  # fails with "Code Security must be enabled" before analysing anything —
+  # nothing to fix in this file, and it goes green on the first run after the
+  # repository is made public. Semgrep is the lane that covers us either way,
+  # which is why it is configured to fail the build on findings.
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
@@ -89,9 +95,19 @@ jobs:
           # history, and history is what becomes public on release.
           fetch-depth: 0
 
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The gitleaks *binary* rather than gitleaks-action. The action refuses to
+      # run for an organisation without a paid licence key, and it fails at that
+      # check — before scanning anything. So this lane reported a red X that
+      # looked like tooling noise while scanning precisely zero commits, which
+      # is the worst state a security control can be in: absent, and appearing
+      # to be present. The CLI is the same scanner, MIT-licensed, no key.
+      #
+      # Pinned to a version rather than :latest so a scanner change lands as a
+      # reviewed commit and never silently alters what CI enforces.
+      - name: Scan history for credentials
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /repo --redact --no-banner --exit-code 1
 
   dependencies:
     name: Dependencies
