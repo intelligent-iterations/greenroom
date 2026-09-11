@@ -1,0 +1,47 @@
+{
+  "name": "greenroom",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A browser platform for evaluating and improving voice AI agents. On-device speech pipeline, composable checks and rubrics, and a quality gate.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/intelligent-iterations/ii-realtime-local-voice-llm-playground.git"
+  },
+  "homepage": "https://github.com/intelligent-iterations/ii-realtime-local-voice-llm-playground#readme",
+  "bugs": {
+    "url": "https://github.com/intelligent-iterations/ii-realtime-local-voice-llm-playground/issues"
+  },
+  "keywords": [
+    "voice-ai",
+    "evaluation",
+    "evals",
+    "llm",
+    "speech-to-text",
+    "text-to-speech",
+    "webgpu",
+    "on-device",
+    "transformers-js",
+    "whisper",
+    "kokoro",
+    "voice-agent",
+    "rubric"
+  ],
+  "packageManager": "pnpm@10.30.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:shared": "pnpm --filter @greenroom/shared build",
+    "dev": "pnpm build:shared && pnpm --filter @greenroom/web dev",
+    "typecheck": "pnpm build:shared && pnpm -r typecheck",
+    "test": "pnpm build:shared && pnpm -r test",
+    "eval": "pnpm build:shared && pnpm --filter @greenroom/evals eval",
+    "eval:gate": "pnpm build:shared && pnpm --filter @greenroom/evals gate"
+  },
+  "devDependencies": {
+    "firebase-tools": "15.29.0",
+    "typescript": "^7.0.2"
+  }
+}

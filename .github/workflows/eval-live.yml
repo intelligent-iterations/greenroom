@@ -1,0 +1,72 @@
+name: Live evaluation
+
+# The expensive half of the harness: real vendor calls, rubric scoring by an
+# LLM judge. Run before a release, after a prompt change, or to compare vendors
+# on identical inputs. Kept off the PR path deliberately — gating every commit
+# on a paid, non-deterministic judge trains people to ignore the gate.
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Model under test
+        type: choice
+        options: [openrouter, azure, gemini]
+        default: openrouter
+      judge:
+        description: Judge model
+        type: choice
+        options: [openrouter, gemini, azure]
+        default: openrouter
+      write_baseline:
+        description: Record this run as the new baseline
+        type: boolean
+        default: false
+
+# The token this workflow hands to every third-party action. Declared read-only
+# rather than inherited: the repository default can be read-write, and on a
+# public repo that turns any compromised build-step dependency into push
+# access. Nothing here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    environment: evaluation
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:shared
+
+      - name: Run evaluation
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          # Through env rather than inline: an input interpolated into a shell
+          # line is script, and this job holds vendor API keys.
+          BACKEND: ${{ inputs.backend }}
+          JUDGE: ${{ inputs.judge }}
+          RECORD: ${{ inputs.write_baseline && '--write-baseline --record' || '' }}
+        run: |
+          pnpm --filter @greenroom/evals exec node --experimental-strip-types src/cli.ts \
+            --backend="$BACKEND" --judge="$JUDGE" --gate $RECORD
+
+      - name: Summarise
+        if: always()
+        run: cat evals/reports/latest.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: eval-report-${{ inputs.backend }}
+          path: evals/reports/

@@ -1,0 +1,873 @@
+/*
+ * A deliberately quiet interface.
+ *
+ * The learner is speaking out loud and listening; anything that pulls the eye
+ * competes with the thing they are actually practising. Motion is limited to
+ * the one indicator that reports whether the system is listening, because that
+ * is the only state they cannot infer from the audio.
+ */
+
+:root {
+  --bg: #0f1211;
+  --surface: #161b19;
+  --surface-2: #1d2422;
+  --line: #2a3330;
+  --text: #e8ede9;
+  --muted: #93a29b;
+  --accent: #6fd39b;
+  --accent-dim: #3f7f5f;
+  --warn: #e0b155;
+  --danger: #e2796b;
+  --radius: 12px;
+  --max: 46rem;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f9f7;
+    --surface: #ffffff;
+    --surface-2: #eef2ef;
+    --line: #dbe3dd;
+    --text: #16201b;
+    --muted: #5c6b63;
+    --accent: #1f7a4d;
+    --accent-dim: #8fc9ac;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+.app__header {
+  margin-bottom: 2rem;
+}
+
+.app__header h1 {
+  display: inline-block;
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.app__mark {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-right: 0.55rem;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 0.05rem;
+}
+
+.app__tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.error {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--text);
+}
+
+/* Scenario picker ------------------------------------------------------- */
+
+.scenario-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  margin-bottom: 0.75rem;
+}
+
+.scenario {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.85rem;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.scenario:hover {
+  border-color: var(--accent-dim);
+}
+
+.scenario--active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Level picker ---------------------------------------------------------- */
+
+.levels {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.level {
+  min-width: 3rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.level--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08130d;
+  font-weight: 600;
+}
+
+/* Facts and toggles ----------------------------------------------------- */
+
+.facts {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+
+.facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.facts > div:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  display: block;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.badge--good {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.badge--warn {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+}
+
+.toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.toggle input {
+  margin-top: 0.35rem;
+  accent-color: var(--accent);
+}
+
+.diagnostics {
+  margin-top: 1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.diagnostics summary {
+  cursor: pointer;
+}
+
+.diagnostics ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.diagnostics code {
+  color: var(--text);
+}
+
+/* Live session ---------------------------------------------------------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.status__dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.status--listening .status__dot {
+  background: var(--accent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.status--speaking .status__dot,
+.status--thinking .status__dot,
+.status--transcribing .status__dot {
+  background: var(--warn);
+}
+
+.status--error .status__dot {
+  background: var(--danger);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+/* Respect a stated preference for reduced motion: the label already carries
+   the state, so the animation is genuinely decorative. */
+@media (prefers-reduced-motion: reduce) {
+  .status--listening .status__dot {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+
+.transcript {
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  scroll-behavior: smooth;
+}
+
+.turn {
+  margin: 0 0 1.1rem;
+}
+
+.turn:last-child {
+  margin-bottom: 0;
+}
+
+.turn__who {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.turn--learner {
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--accent-dim);
+}
+
+.turn--live {
+  opacity: 0.72;
+}
+
+.latency {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.latency--good {
+  color: var(--accent);
+}
+
+.latency--ok {
+  color: var(--warn);
+}
+
+.latency--slow {
+  color: var(--danger);
+}
+
+.feedback {
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+/* Buttons --------------------------------------------------------------- */
+
+.primary {
+  align-self: flex-start;
+  padding: 0.75rem 1.4rem;
+  background: var(--accent);
+  border: 0;
+  border-radius: 10px;
+  color: #08130d;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+progress {
+  width: 100%;
+  height: 0.4rem;
+  accent-color: var(--accent);
+}
+
+/* Diagnostics timeline ---------------------------------------------------- */
+
+.events {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+}
+
+.events li {
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.events code {
+  color: var(--accent);
+}
+
+/* Account controls -------------------------------------------------------- */
+
+.account {
+  margin-top: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.account__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 22rem;
+  padding: 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.account__form input {
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+}
+
+.link {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.small-btn {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+.error.small {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+/* Model picker ------------------------------------------------------------ */
+
+.models {
+  margin: 0 0 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.models legend {
+  padding: 0 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.model {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.4rem 0;
+  cursor: pointer;
+}
+
+.model input {
+  margin-top: 0.3rem;
+  accent-color: var(--accent);
+}
+
+.model__note {
+  display: block;
+}
+
+.model--unavailable {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Free-text inputs -------------------------------------------------------- */
+
+.prompt-input,
+.repo-input {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.repo-input {
+  flex: 1;
+  min-width: 14rem;
+  font-family: ui-monospace, monospace;
+}
+
+.eval-fail {
+  color: var(--danger);
+  font-size: 0.85rem;
+  padding-left: 0.8rem;
+}
+
+/* Readiness notice. Degraded is advisory, blocked is a dead end with a way out. */
+.notice {
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 1rem 0;
+  border-left: 3px solid;
+}
+.notice p {
+  margin: 0.4rem 0 0;
+}
+.notice ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+.notice li {
+  margin: 0.25rem 0;
+}
+.notice--degraded {
+  border-color: #b8860b;
+  background: color-mix(in srgb, #b8860b 8%, transparent);
+}
+.notice--blocked {
+  border-color: #b04a4a;
+  background: color-mix(in srgb, #b04a4a 8%, transparent);
+}
+
+/*
+ * The download.
+ *
+ * This is the first thing anyone experiences and it used to be a single bar
+ * that went backwards twice. It gets the one piece of emphasis on the screen:
+ * a list where every stage holds its place, so progress reads as work being
+ * completed rather than restarted.
+ *
+ * Figures are tabular. A byte counter whose digits change width is motion the
+ * eye tracks, and there is already enough waiting happening.
+ */
+.download {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1.25rem;
+}
+
+.download__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.download__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.download__figures {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.download__overall {
+  block-size: 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.download__fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent);
+  /* Only ever grows, so the transition never reads as a correction. */
+  transition: inline-size 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.download__stages {
+  list-style: none;
+  margin: 1.1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.stage {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.stage--active {
+  color: var(--text);
+}
+
+.stage__name {
+  white-space: nowrap;
+}
+
+.stage__track {
+  block-size: 0.2rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.stage__fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent-dim);
+  transition: inline-size 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stage--active .stage__fill {
+  background: var(--accent);
+}
+
+.stage--done .stage__fill {
+  background: var(--accent-dim);
+  inline-size: 100% !important;
+}
+
+.stage__note {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 34rem) {
+  .stage {
+    grid-template-columns: 1fr auto;
+  }
+  .stage__track {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download__fill,
+  .stage__fill {
+    transition: none;
+  }
+}
+
+/* Where the weights live. */
+.destination__current {
+  margin: 0 0 0.6rem;
+}
+
+.destination__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+/* A second-rank action: real, but not the thing on the screen to press. */
+.secondary {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--accent-dim);
+}
+
+.secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Navigation ---------------------------------------------------------------
+   Two destinations, sitting on the rule that separates the header from the
+   content it switches. Underline rather than a pill: the tabs are part of the
+   page's structure, not buttons floating on it. */
+.nav {
+  margin: -1rem 0 1.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.nav__list {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav__tab {
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.nav__tab:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.nav__tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.nav__tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nav__lock {
+  margin: 0;
+  padding: 0.4rem 0.9rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Model picker -------------------------------------------------------------
+   A ladder of options, heaviest first. The metadata row is the point: a name
+   alone gives nobody enough to choose with. */
+.picker {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker__row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.picker__row:hover {
+  border-color: var(--accent-dim);
+}
+
+.picker__row--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.picker__row--unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.picker__row--unavailable:hover {
+  border-color: var(--line);
+}
+
+.picker__row input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.picker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.picker__name {
+  font-weight: 600;
+}
+
+/* Tabular numerals so the sizes line up down the column and can be compared
+   at a glance rather than read one at a time. */
+.picker__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.picker__note {
+  margin-top: 0.15rem;
+}
+
+.picker__blocked {
+  margin-top: 0.3rem;
+  color: var(--warn);
+}

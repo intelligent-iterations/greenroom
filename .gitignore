@@ -1,0 +1,45 @@
+node_modules/
+dist/
+build/
+.output/
+*.tsbuildinfo
+
+# local env / secrets
+.env
+.env.*
+!.env.example
+serviceAccount*.json
+
+# firebase
+# Points every clone at one specific project; .firebaserc.example is the
+# tracked shape. `firebase use <project>` writes this locally.
+.firebaserc
+.firebase/
+firebase-debug.log
+ui-debug.log
+firestore-debug.log
+
+# eval output
+evals/reports/*
+!evals/reports/.gitkeep
+
+.DS_Store
+.vscode/
+.idea/
+
+# terraform / opentofu
+infra/.terraform/
+infra/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+.terraform.tfstate.lock.info
+
+# generated functions deploy directory
+packages/functions/dist/
+
+# copied at build time by packages/web/scripts/copy-vad-assets.mjs
+packages/web/public/vad/
+
+# locally cached model weights
+.model-cache/

@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// Access model, in one sentence: a learner owns their own documents, and the
+// parts of those documents that decide what they get asked next are writable
+// only by the server.
+//
+// Mastery estimates drive difficulty selection in the prompt layer. If a client
+// could write them it could choose its own curriculum, so `mastery`,
+// `recentErrors` and `sessionsCompleted` are updated exclusively by the
+// onSessionCreated trigger, which runs with Admin credentials and bypasses
+// these rules.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Fields the server alone may change.
+    function serverOwnedFields() {
+      return ['mastery', 'recentErrors', 'sessionsCompleted'];
+    }
+
+    // A pasted CV or job description is the most identifying thing this product
+    // ever sees, and it is only ever needed on the device that does the
+    // retrieval. The client is written not to send it; this is what makes that
+    // a guarantee rather than a promise.
+    function carriesLearnerDocuments() {
+      return request.resource.data.keys().hasAny(['documents']);
+    }
+
+    function serverFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(serverOwnedFields().toSet());
+    }
+
+    match /learners/{uid} {
+      allow read: if isOwner(uid);
+
+      // A learner may create their own profile, but not one that arrives with
+      // mastery already filled in.
+      allow create: if isOwner(uid)
+        && request.resource.data.userId == uid
+        && request.resource.data.mastery.size() == 0
+        && request.resource.data.sessionsCompleted == 0
+        && !carriesLearnerDocuments();
+
+      // Preferences (level, target role, language) are the learner's to change.
+      allow update: if isOwner(uid)
+        && request.resource.data.userId == uid
+        && serverFieldsUnchanged()
+        && !carriesLearnerDocuments();
+
+      allow delete: if isOwner(uid);
+
+      match /sessions/{sessionId} {
+        allow read: if isOwner(uid);
+
+        // Append-only. A transcript that could be edited after the fact is not
+        // evidence of anything, and the scoring trigger reads it as evidence.
+        allow create: if isOwner(uid)
+          && request.resource.data.userId == uid
+          && request.resource.data.turns.size() <= 100
+          // Passage *references* are fine here — they name a scenario note or a
+          // chunk index, not the document text, which stays on the device.
+          && (!('groundedPassages' in request.resource.data)
+              || request.resource.data.groundedPassages.size() <= 40);
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

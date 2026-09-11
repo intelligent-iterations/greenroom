@@ -1,0 +1,22 @@
+{
+  "name": "@greenroom/evals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "eval": "node --experimental-strip-types src/cli.ts",
+    "gate": "node --experimental-strip-types src/cli.ts --gate",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@greenroom/shared": "workspace:*",
+    "@huggingface/transformers": "^4.2.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

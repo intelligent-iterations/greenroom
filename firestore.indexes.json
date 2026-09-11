@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {
+      "//": "Recent sessions for a learner, newest first. The only listing query the app makes.",
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "startedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

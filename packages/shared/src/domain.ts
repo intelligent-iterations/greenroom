@@ -1,0 +1,95 @@
+import { z } from 'zod';
+
+/**
+ * Core domain model.
+ *
+ * These types are the contract between the three surfaces that need to agree:
+ * the browser pipeline, the Cloud Functions learner-state layer, and the
+ * offline evaluation harness. Anything that crosses one of those boundaries is
+ * validated with the zod schema rather than trusted, because two of the three
+ * are reachable by a client we do not control.
+ */
+
+/**
+ * A document the learner supplied — a pasted CV, a job description, notes.
+ *
+ * Learner-owned rather than scenario-owned, and the distinction is load-bearing.
+ * The scenario catalogue is shared content that three surfaces must see
+ * byte-identically (see scenarios.ts and the re-export in functions/), so a
+ * per-person document hung off a scenario would be silently absent server-side.
+ * It also has to be the learner's to delete, which a bundled constant is not.
+ *
+ * Stored as raw text and chunked at retrieval time, never pre-chunked, so
+ * changing the chunker does not require migrating anyone's data.
+ */
+export const SourceDocument = z.object({
+  id: z.string().min(1),
+  kind: z.enum(['cv', 'job_description', 'notes']),
+  title: z.string().min(1).max(120),
+  text: z.string().max(20_000),
+  updatedAt: z.number().int(),
+});
+export type SourceDocument = z.infer<typeof SourceDocument>;
+
+/**
+ * A reference to a passage that was actually put in front of the model.
+ *
+ * Recorded on the session so a grounding claim in a transcript can be checked
+ * against what the interviewer was given, rather than reconstructed afterwards
+ * from a retriever that may since have changed.
+ */
+export const PassageRef = z.object({
+  sourceId: z.string().min(1),
+  chunkIndex: z.number().int().min(0),
+  /**
+   * Present only for passages from the shared scenario catalogue, which is
+   * public content. A learner document's text is never written to the server:
+   * the reference is enough to reproduce it on the device that holds the
+   * document, and a CV is the most identifying thing this product ever sees.
+   */
+  text: z.string().max(400).optional(),
+});
+export type PassageRef = z.infer<typeof PassageRef>;
+
+export const TurnRole = z.enum(['interviewer', 'learner', 'system']);
+export type TurnRole = z.infer<typeof TurnRole>;
+
+export const Turn = z.object({
+  id: z.string().min(1),
+  role: TurnRole,
+  text: z.string(),
+  startedAt: z.number().int(),
+  /** Wall-clock ms this turn occupied, mic-open to audio-complete. */
+  durationMs: z.number().min(0).optional(),
+  /** STT confidence when the turn came from speech. */
+  asrConfidence: z.number().min(0).max(1).optional(),
+  /** True when the learner cut the interviewer off mid-sentence. */
+  bargedIn: z.boolean().optional(),
+});
+export type Turn = z.infer<typeof Turn>;
+
+export const SessionRecord = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+  scenarioId: z.string().min(1),
+  startedAt: z.number().int(),
+  endedAt: z.number().int().optional(),
+  turns: z.array(Turn),
+  /** Which model actually served the session; see routing.ts. */
+  modelId: z.string(),
+  /** Prompt template version, so a regression can be traced to a prompt change. */
+  promptVersion: z.string(),
+  /** Aggregated stage latencies, p50/p95 over the session. */
+  latency: z
+    .object({
+      sttMsP50: z.number().optional(),
+      firstTokenMsP50: z.number().optional(),
+      firstAudioMsP50: z.number().optional(),
+      turnaroundMsP50: z.number().optional(),
+      turnaroundMsP95: z.number().optional(),
+    })
+    .optional(),
+  /** Passages injected into the interviewer prompt, in the order they were used. */
+  groundedPassages: z.array(PassageRef).max(40).default([]),
+});
+export type SessionRecord = z.infer<typeof SessionRecord>;

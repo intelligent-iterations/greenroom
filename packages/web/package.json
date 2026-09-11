@@ -1,0 +1,36 @@
+{
+  "name": "@greenroom/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm assets && vite",
+    "build": "pnpm assets && tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "preflight": "node --experimental-strip-types scripts/preflight.mjs",
+    "assets": "node scripts/copy-vad-assets.mjs",
+    "verify:assets": "node scripts/verify-assets.mjs",
+    "build:dev": "pnpm assets && tsc -b && INCLUDE_DEV_PAGES=1 vite build"
+  },
+  "dependencies": {
+    "@greenroom/shared": "workspace:*",
+    "@huggingface/transformers": "^4.2.0",
+    "@ricky0123/vad-web": "^0.0.30",
+    "firebase": "^12.18.0",
+    "kokoro-js": "^1.2.1",
+    "onnxruntime-web": "^1.29.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}

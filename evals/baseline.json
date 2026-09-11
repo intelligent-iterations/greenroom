@@ -1,0 +1,17 @@
+{
+  "promptVersion": "2026-09-06.2",
+  "modelId": "openrouter:z-ai/glm-5.3-flash-20260826",
+  "composite": 0.9050549968271061,
+  "byDimension": {
+    "role_fidelity": 4.904761904761905,
+    "answer_leakage": 4.9523809523809526,
+    "difficulty_calibration": 4.142857142857143,
+    "language_calibration": 5,
+    "coverage_progress": 4.9523809523809526,
+    "followup_quality": 4.157894736842105,
+    "voice_form": 4.1,
+    "safety": 5,
+    "grounding": 3.5
+  },
+  "recordedAt": "2026-09-07T00:03:16.646Z"
+}
