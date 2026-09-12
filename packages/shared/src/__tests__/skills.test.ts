@@ -28,11 +28,13 @@ const realChecks = new Set([...checkSource.matchAll(/name: '([a-z_]+)'/g)].map((
 
 describe('agent skills', () => {
   it('ships at least the three voice skills', () => {
-    expect(skills.map((s) => s.name).sort()).toEqual([
-      'voice-checks',
-      'voice-evals',
-      'voice-pipeline',
-    ]);
+    // Containment rather than equality: the name of this test says "at least",
+    // and an assertion that disagrees with its own name is a trap for whoever
+    // adds the next skill. Every skill is still held to the rules below.
+    const names = skills.map((s) => s.name);
+    for (const required of ['voice-checks', 'voice-evals', 'voice-pipeline']) {
+      expect(names).toContain(required);
+    }
   });
 
   for (const skill of skills) {

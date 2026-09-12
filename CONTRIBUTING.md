@@ -39,6 +39,17 @@ There are three agent skills in `.claude/skills/` that carry the rest of this in
 more detail — `voice-evals`, `voice-checks`, `voice-pipeline`. They are written
 for an agent but they read fine as prose.
 
+## How changes get made here
+
+[docs/PROTOCOL.md](docs/PROTOCOL.md) is the development protocol: eight rules,
+each bought with a specific failure in this repository, and each written with
+the failure attached so the cost is visible. It is short on purpose.
+
+The short version, if you read nothing else: test the parts that touch the
+outside world *first*, treat your own test doubles as the least trustworthy code
+in the suite, check the property you actually depend on rather than a proxy for
+it, and say plainly what you did not verify.
+
 ## The shape of the codebase
 
 `packages/shared` is **the core**: everything true of any spoken agent — checks,
