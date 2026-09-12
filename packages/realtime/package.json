@@ -1,7 +1,7 @@
 {
   "name": "greenroom-realtime",
   "version": "0.1.0",
-  "description": "A vendor-neutral interface for full-duplex (speech-to-speech) voice sessions, with a client for Kyutai Moshi.",
+  "description": "Vendor-neutral full-duplex voice interfaces, an in-browser speech-to-speech stage for LFM2.5-Audio, and a client for Kyutai Moshi.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,6 +14,10 @@
     "./moshi": {
       "types": "./dist/moshi/index.d.ts",
       "default": "./dist/moshi/index.js"
+    },
+    "./lfm2": {
+      "types": "./dist/lfm2/index.d.ts",
+      "default": "./dist/lfm2/index.js"
     }
   },
   "repository": {
