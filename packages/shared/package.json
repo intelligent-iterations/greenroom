@@ -22,7 +22,8 @@
     "dev": "tsc -p tsconfig.json --watch"
   },
   "dependencies": {
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "greenroom-realtime": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

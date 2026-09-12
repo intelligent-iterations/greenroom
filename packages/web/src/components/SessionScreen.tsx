@@ -5,10 +5,17 @@ import { DiagnosticsPanel } from './DiagnosticsPanel.js';
 import { DownloadPanel } from './DownloadPanel.js';
 import type { useSession } from '../state/useSession.js';
 
+/**
+ * What the machine is doing, in the second person.
+ *
+ * "Transcribing" and "inference" describe the implementation; a person in a
+ * conversation needs to know whose turn it is. These are the four states that
+ * change what they should do with their voice, and the wording says so.
+ */
 const STATE_LABEL: Record<string, string> = {
   loading: 'Getting ready',
   listening: 'Listening',
-  transcribing: 'Reading that back',
+  transcribing: 'Got that',
   thinking: 'Thinking',
   speaking: 'Speaking',
   ended: 'Finished',
@@ -16,12 +23,19 @@ const STATE_LABEL: Record<string, string> = {
   idle: 'Idle',
 };
 
+const STATE_HINT: Record<string, string> = {
+  listening: 'Talk, then pause when you are done',
+  speaking: 'Talk over it to interrupt',
+  thinking: 'One moment',
+  transcribing: 'Working out what you said',
+};
+
 export function SessionScreen({ session }: { session: ReturnType<typeof useSession> }) {
   const { sessionState, turns, liveText, latency, error } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Follow the conversation as it grows. Anchored to the transcript container
-  // rather than the window so it does not fight a learner scrolling back.
+  // rather than the window so it does not fight someone scrolling back.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns.length, liveText]);
@@ -30,74 +44,70 @@ export function SessionScreen({ session }: { session: ReturnType<typeof useSessi
     latency.map((l) => l.firstAudioMs).filter((v): v is number => v !== undefined),
   );
 
+  const spoken = turns.filter((t) => t.role !== 'system');
+
   return (
-    <div className="stack">
-      <section className={`status status--${sessionState}`}>
-        <span className="status__dot" aria-hidden="true" />
-        <strong>{STATE_LABEL[sessionState] ?? sessionState}</strong>
-        {sessionState === 'listening' && (
-          <span className="muted"> — just start talking, then pause when you are done</span>
+    <div className="live">
+      {/* The one thing that moves on this screen. Everything else is still, so
+          the pulse reads as "the room is live" rather than as decoration. */}
+      <section className={`vu vu--${sessionState}`} aria-live="polite">
+        <span className="vu__lamp" aria-hidden="true" />
+        <span className="vu__text">
+          <strong className="vu__state">{STATE_LABEL[sessionState] ?? sessionState}</strong>
+          {STATE_HINT[sessionState] && (
+            <span className="vu__hint">{STATE_HINT[sessionState]}</span>
+          )}
+        </span>
+        {firstAudio !== undefined && (
+          <span
+            className={`vu__latency ${
+              firstAudio <= LATENCY_BUDGET.firstAudioGoodMs
+                ? 'is-good'
+                : firstAudio <= LATENCY_BUDGET.firstAudioAcceptableMs
+                  ? 'is-ok'
+                  : 'is-slow'
+            }`}
+            title="Median time from when you stop speaking to when it starts replying"
+          >
+            {Math.round(firstAudio)}ms
+          </span>
         )}
-        {sessionState === 'speaking' && (
-          <span className="muted"> — talk over it to interrupt</span>
-        )}
-        {sessionState === 'transcribing' && <span className="muted"> — reading that back</span>}
-        {sessionState === 'thinking' && <span className="muted"> — one moment</span>}
       </section>
 
       {sessionState === 'loading' && <DownloadPanel />}
 
       <div className="transcript" ref={scrollRef}>
-        {turns.filter((t) => t.role !== 'system').length === 0 && !liveText && (
-          <p className="muted">
+        {spoken.length === 0 && !liveText && (
+          <p className="transcript__empty">
             {sessionState === 'loading'
-              ? 'The interviewer will speak first.'
-              : 'Listening. Say something to begin.'}
+              ? 'It will speak first.'
+              : 'Say something to begin.'}
           </p>
         )}
-        {turns
-          .filter((t) => t.role !== 'system')
-          .map((turn) => (
-            <p key={turn.id} className={`turn turn--${turn.role}`}>
-              <span className="turn__who">
-                {turn.role === 'interviewer' ? 'Interviewer' : 'You'}
-              </span>
-              {turn.text}
-              {turn.bargedIn && turn.role === 'interviewer' && (
-                <span className="muted small"> (you cut in)</span>
-              )}
-            </p>
-          ))}
+
+        {spoken.map((turn) => (
+          <article key={turn.id} className={`said said--${turn.role}`}>
+            <p className="said__text">{turn.text}</p>
+            {turn.bargedIn && turn.role !== 'learner' && (
+              <p className="said__note">you cut in here</p>
+            )}
+          </article>
+        ))}
+
         {liveText && (
-          <p className="turn turn--interviewer turn--live">
-            <span className="turn__who">Interviewer</span>
-            {liveText}
-          </p>
+          <article className="said said--interviewer said--live">
+            <p className="said__text">{liveText}</p>
+          </article>
         )}
       </div>
 
       {error && <p className="error">{error}</p>}
 
-      <DiagnosticsPanel />
-
-      <div className="row">
-        <button type="button" className="primary" onClick={() => void session.stop()}>
+      <div className="live__controls">
+        <button type="button" className="ghost" onClick={() => void session.stop()}>
           End and get feedback
         </button>
-        {firstAudio !== undefined && (
-          <span
-            className={`latency ${
-              firstAudio <= LATENCY_BUDGET.firstAudioGoodMs
-                ? 'latency--good'
-                : firstAudio <= LATENCY_BUDGET.firstAudioAcceptableMs
-                  ? 'latency--ok'
-                  : 'latency--slow'
-            }`}
-            title="Median time from when you stop speaking to when the interviewer starts"
-          >
-            {Math.round(firstAudio)} ms to reply
-          </span>
-        )}
+        <DiagnosticsPanel />
       </div>
     </div>
   );

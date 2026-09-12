@@ -1,0 +1,57 @@
+{
+  "name": "greenroom-realtime",
+  "version": "0.1.0",
+  "description": "A vendor-neutral interface for full-duplex (speech-to-speech) voice sessions, with a client for Kyutai Moshi.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./moshi": {
+      "types": "./dist/moshi/index.d.ts",
+      "default": "./dist/moshi/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/intelligent-iterations/greenroom.git",
+    "directory": "packages/realtime"
+  },
+  "homepage": "https://github.com/intelligent-iterations/greenroom/tree/main/packages/realtime#readme",
+  "bugs": {
+    "url": "https://github.com/intelligent-iterations/greenroom/issues"
+  },
+  "keywords": [
+    "voice-ai",
+    "realtime",
+    "full-duplex",
+    "speech-to-speech",
+    "moshi",
+    "kyutai",
+    "voice-agent",
+    "websocket"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm build"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}

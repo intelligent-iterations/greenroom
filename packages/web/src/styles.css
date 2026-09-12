@@ -20,6 +20,17 @@
   --danger: #e2796b;
   --radius: 12px;
   --max: 46rem;
+
+  /*
+   * The bulb.
+   *
+   * A greenroom is lit by the mirror, and "you are on" is the one thing in that
+   * room that is warm. It is the only hue in the interface that is not part of
+   * the green family, which is what makes it mean something: nothing else can
+   * be mistaken for live.
+   */
+  --live: #e8b45c;
+  --live-glow: rgba(232, 180, 92, 0.22);
 }
 
 @media (prefers-color-scheme: light) {
@@ -32,6 +43,8 @@
     --muted: #5c6b63;
     --accent: #1f7a4d;
     --accent-dim: #8fc9ac;
+    --live: #b07414;
+    --live-glow: rgba(176, 116, 20, 0.16);
   }
 }
 
@@ -870,4 +883,314 @@ progress {
 .picker__blocked {
   margin-top: 0.3rem;
   color: var(--warn);
+}
+
+/* ==========================================================================
+   The room
+   --------------------------------------------------------------------------
+   Two screens, one idea: the conversation is the stage and everything else
+   steps back. What changed is hierarchy, not palette — the old screens were
+   five cards of identical weight, so nothing was the point and the one action
+   that mattered read as the least important thing present.
+   ========================================================================== */
+
+/* The hero -----------------------------------------------------------------
+   Not a card. It is the only thing on the setup screen that is not a card,
+   which is the whole reason it reads as the way in. */
+.hero {
+  padding: 2.5rem 0 2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.hero__title {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  /* Comfortably under 80 characters at every width. */
+  max-width: 18ch;
+}
+
+.hero__lede {
+  margin: 0 0 1.75rem;
+  max-width: 44ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.55;
+}
+
+.hero__go {
+  padding: 0.85rem 1.6rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #08120d;
+  font: inherit;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.hero__go:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, white);
+}
+
+.hero__go:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.hero__go:disabled {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.hero__meta,
+.hero__blocked {
+  margin: 0.85rem 0 0;
+  max-width: 52ch;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.hero__meta {
+  color: var(--muted);
+}
+
+/* Amber rather than red: nothing is broken, this machine simply cannot hold a
+   model yet, and there is something the reader can do about it. */
+.hero__blocked {
+  color: var(--live);
+}
+
+.aside {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Setup, folded away ------------------------------------------------------- */
+.setup {
+  border-top: 1px solid var(--line);
+  padding-top: 0.25rem;
+}
+
+.setup__summary {
+  padding: 0.7rem 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.setup__summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup__summary::before {
+  content: '+';
+  display: inline-block;
+  width: 1.1rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.setup[open] .setup__summary::before {
+  content: '–';
+}
+
+.setup__summary:hover {
+  color: var(--text);
+}
+
+.setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-bottom: 1rem;
+}
+
+/* The live screen ---------------------------------------------------------- */
+.live {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* Fills the viewport so the transcript scrolls inside the conversation
+     rather than the page — you never lose the state indicator or the control
+     to end the session. */
+  min-height: calc(100vh - 11rem);
+}
+
+.vu {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.vu__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.vu__state {
+  font-size: 0.98rem;
+  letter-spacing: -0.01em;
+}
+
+.vu__hint {
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+
+.vu__lamp {
+  flex: none;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+/* Listening is the only state the person cannot hear for themselves, so it is
+   the only one that gets the bulb and the only thing on screen that moves. */
+.vu--listening .vu__lamp {
+  background: var(--live);
+  box-shadow: 0 0 0 0 var(--live-glow);
+  animation: lamp 1.9s ease-out infinite;
+}
+
+.vu--listening {
+  border-color: color-mix(in srgb, var(--live) 40%, var(--line));
+}
+
+.vu--speaking .vu__lamp,
+.vu--thinking .vu__lamp,
+.vu--transcribing .vu__lamp {
+  background: var(--accent);
+}
+
+.vu--error .vu__lamp {
+  background: var(--danger);
+}
+
+@keyframes lamp {
+  0% { box-shadow: 0 0 0 0 var(--live-glow); }
+  70% { box-shadow: 0 0 0 0.7rem transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vu--listening .vu__lamp {
+    animation: none;
+    box-shadow: 0 0 0 0.25rem var(--live-glow);
+  }
+}
+
+.vu__latency {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.vu__latency.is-good { color: var(--accent); }
+.vu__latency.is-ok { color: var(--live); }
+.vu__latency.is-slow { color: var(--danger); }
+
+/* The conversation --------------------------------------------------------- */
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 0.5rem 0;
+}
+
+.transcript__empty {
+  margin: auto;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* Asymmetry rather than bubbles. Two speakers, distinguished by where the text
+   sits and which side is marked, so a long answer is still a readable
+   paragraph instead of a balloon. */
+.said {
+  max-width: 46ch;
+}
+
+.said__text {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.said--interviewer {
+  align-self: flex-start;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--accent-dim);
+}
+
+.said--learner {
+  align-self: flex-end;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.said--live .said__text::after {
+  content: '';
+  display: inline-block;
+  width: 0.45rem;
+  height: 1rem;
+  margin-left: 0.15rem;
+  background: var(--accent);
+  vertical-align: -0.15rem;
+  animation: caret 1s steps(2) infinite;
+}
+
+@keyframes caret {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .said--live .said__text::after { animation: none; }
+}
+
+.said__note {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.live__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.ghost {
+  align-self: flex-start;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  border-color: var(--accent-dim);
 }

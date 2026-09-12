@@ -91,7 +91,22 @@ export class RealtimeSession extends Emitter<SessionEvents> {
     }
 
     this.#setState('loading');
-    await this.#stage.load((p) => this.emit('progress', p));
+    // Optional: a server-backed stage has nothing to fetch, because the
+    // weights already live on whatever is running the model.
+    //
+    // Mapped onto the cascade's LoadProgress here rather than in the package.
+    // A duplex model is one artefact, not three, so it reports against `llm` —
+    // the app's progress UI is shaped around the cascade's stages and this is
+    // the adapter's job, not the published interface's.
+    await this.#stage.load?.((p) =>
+      this.emit('progress', {
+        stage: 'llm',
+        progress: p.fraction ?? 0,
+        ...(p.file !== undefined ? { file: p.file } : {}),
+        ...(p.loaded !== undefined ? { loaded: p.loaded } : {}),
+        ...(p.total !== undefined ? { total: p.total } : {}),
+      }),
+    );
     await this.#stage.open({ systemPrompt: this.#systemPrompt });
 
     // onSpeechEnd is unused on this path: the vendor decides when the learner

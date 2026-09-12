@@ -68,6 +68,15 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(esbuild@0.28.2)(yaml@2.9.0))
 
+  packages/realtime:
+    devDependencies:
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(yaml@2.9.0))
+
   packages/rules:
     devDependencies:
       '@firebase/rules-unit-testing':
@@ -91,6 +100,9 @@ importers:
 
   packages/shared:
     dependencies:
+      greenroom-realtime:
+        specifier: workspace:*
+        version: link:../realtime
       zod:
         specifier: ^4.5.4
         version: 4.5.4
