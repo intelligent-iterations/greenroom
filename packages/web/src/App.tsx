@@ -5,6 +5,7 @@ import { EvalsScreen } from './components/EvalsScreen.js';
 import { SessionScreen } from './components/SessionScreen.js';
 import { SetupScreen } from './components/SetupScreen.js';
 import { Nav } from './components/Nav.js';
+import { RealtimeScreen } from './components/RealtimeScreen.js';
 import { loadLearnerState } from './state/learner.js';
 import { useAppStore } from './state/store.js';
 import { useSession } from './state/useSession.js';
@@ -35,7 +36,9 @@ export function App() {
           not part of it. */}
       <Nav
         phase={phase}
-        onNavigate={(to) => setPhase(to === 'evals' ? 'evals' : 'setup')}
+        onNavigate={(to) =>
+          setPhase(to === 'evals' ? 'evals' : to === 'realtime' ? 'realtime' : 'setup')
+        }
       />
 
       <main>
@@ -45,6 +48,8 @@ export function App() {
           <SetupScreen learner={learner} session={session} />
         ) : phase === 'live' ? (
           <SessionScreen session={session} />
+        ) : phase === 'realtime' ? (
+          <RealtimeScreen />
         ) : phase === 'evals' ? (
           <EvalsScreen onExit={() => setPhase('setup')} />
         ) : (

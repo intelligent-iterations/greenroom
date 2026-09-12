@@ -18,7 +18,7 @@ import type { SessionState } from '../voice/session.js';
  * adapter between the two, so every component reads one source and the pipeline
  * never reaches into React.
  */
-export type Phase = 'setup' | 'live' | 'debrief' | 'evals';
+export type Phase = 'setup' | 'live' | 'debrief' | 'evals' | 'realtime';
 
 export interface LatencySample extends TurnTimings {
   turnIndex: number;

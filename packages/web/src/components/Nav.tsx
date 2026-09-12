@@ -8,20 +8,27 @@ import type { Phase } from '../state/store.js';
  * reachable only through a sentence of small print under the start button.
  * A capability nobody can find is a capability nobody has.
  *
- * Two destinations, not four. `live` and `debrief` are states a conversation
+* Three destinations. `live` and `debrief` are states a conversation `live` and `debrief` are states a conversation
  * passes through, not places to go; putting them in a navigation bar would
  * offer people a "Debrief" tab that is empty until they have earned it, which
  * is a worse experience than not offering it. So the bar shows where you can
  * *go*, and the conversation's own progress is the screen's business.
  */
-export type Destination = 'talk' | 'evals';
+export type Destination = 'talk' | 'realtime' | 'evals';
 
 export function destinationFor(phase: Phase): Destination {
-  return phase === 'evals' ? 'evals' : 'talk';
+  if (phase === 'evals') return 'evals';
+  if (phase === 'realtime') return 'realtime';
+  return 'talk';
 }
 
 const TABS: { id: Destination; label: string; hint: string }[] = [
   { id: 'talk', label: 'Talk', hint: 'Hold a live conversation with a model on this device' },
+  {
+    id: 'realtime',
+    label: 'Realtime',
+    hint: 'One end-to-end speech-to-speech model, no cascade',
+  },
   { id: 'evals', label: 'Evals', hint: 'Score a model against checks and a rubric' },
 ];
 

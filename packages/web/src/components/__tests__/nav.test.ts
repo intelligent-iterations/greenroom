@@ -26,10 +26,14 @@ describe('destinationFor', () => {
     expect(destinationFor('evals')).toBe('evals');
   });
 
+  it('maps the end-to-end model to its own destination', () => {
+    expect(destinationFor('realtime')).toBe('realtime');
+  });
+
   it('leaves no phase without a tab', () => {
-    const phases = ['setup', 'live', 'debrief', 'evals'] as const;
+    const phases = ['setup', 'live', 'debrief', 'evals', 'realtime'] as const;
     for (const phase of phases) {
-      expect(['talk', 'evals']).toContain(destinationFor(phase));
+      expect(['talk', 'realtime', 'evals']).toContain(destinationFor(phase));
     }
   });
 });
