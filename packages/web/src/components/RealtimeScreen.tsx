@@ -1,22 +1,31 @@
-import { useRealtime } from '../state/useRealtime.js';
-import { chooseModelFolder, supportsModelFolder } from '../voice/model-store.js';
+import { useRealtime, type SetupGate } from '../state/useRealtime.js';
 
 /**
- * One model, speech in and speech out, running in this tab.
+ * One model, speech in and speech out, and the four things that have to be true
+ * before it can run.
  *
- * The cascade's screen explains three stages because it has three. This one has
- * a single model, so the screen is about the two things that actually gate it:
- * whether the machine has WebGPU, and where two gigabytes of weights are going
- * to live.
+ * Shown as a checklist rather than a button, because a two-gigabyte setup fails
+ * in specific ways — no WebGPU, no folder, half a download — and each wants a
+ * different repair. The previous screen collapsed all of that into one control
+ * that either worked or sat silently, which is how "it's stuck" became the only
+ * available description.
  */
+
+const GATE_ORDER: SetupGate[] = ['device', 'location', 'files', 'ready'];
+
+function gb(bytes: number): string {
+  return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+}
+
 export function RealtimeScreen() {
   const rt = useRealtime();
-  const canChoose = supportsModelFolder();
+  const { gates } = rt;
+  const survey = gates.files.survey;
+  const done = (g: SetupGate) => GATE_ORDER.indexOf(g) < GATE_ORDER.indexOf(rt.gate);
+  const running = rt.phase === 'listening' || rt.phase === 'thinking' || rt.phase === 'speaking';
 
-  const downloaded = rt.files.filter((f) => f.cached).length;
-  const inFlight = rt.files.filter((f) => !f.cached && f.total && f.loaded < f.total);
-  const totalBytes = rt.files.reduce((sum, f) => sum + (f.total ?? 0), 0);
-  const loadedBytes = rt.files.reduce((sum, f) => sum + f.loaded, 0);
+  const percent = rt.expected > 0 ? Math.min(100, (rt.loaded / rt.expected) * 100) : 0;
+  const latest = rt.steps[rt.steps.length - 1];
 
   return (
     <div className="stack">
@@ -26,110 +35,162 @@ export function RealtimeScreen() {
           LFM2.5-Audio runs end to end in this tab on WebGPU — no recogniser, no separate
           voice, no server. Prosody and content come from the same forward pass.
         </p>
-
-        {rt.phase === 'idle' || rt.phase === 'ready-to-load' ? (
-          <button type="button" className="hero__go" onClick={() => void rt.load()}>
-            {rt.survey?.missing === 0 ? 'Start talking' : 'Download and start'}
-          </button>
-        ) : rt.phase === 'loading' ? (
-          <button type="button" className="hero__go" disabled>
-            Loading the model…
-          </button>
-        ) : rt.phase === 'blocked' || rt.phase === 'error' ? (
-          <button type="button" className="hero__go" onClick={() => void rt.load()}>
-            Try again
-          </button>
-        ) : (
-          <button type="button" className="ghost" onClick={() => void rt.stop()}>
-            End session
-          </button>
-        )}
-
-        {rt.message && (
-          <p className={rt.phase === 'blocked' || rt.phase === 'error' ? 'hero__blocked' : 'hero__meta'}>
-            {rt.message}
-          </p>
-        )}
-        {!rt.message && rt.phase === 'idle' && (
-          <p className="hero__meta">
-            {rt.model.label} · about {(rt.model.downloadMb / 1024).toFixed(1)} GB, downloaded once
-          </p>
-        )}
       </section>
 
-      {(rt.phase === 'listening' || rt.phase === 'thinking' || rt.phase === 'speaking') && (
-        <section className={`vu vu--${rt.phase}`} aria-live="polite">
-          <span className="vu__lamp" aria-hidden="true" />
-          <span className="vu__text">
-            <strong className="vu__state">
-              {rt.phase === 'listening' ? 'Listening' : rt.phase === 'thinking' ? 'Thinking' : 'Speaking'}
-            </strong>
-            <span className="vu__hint">
-              {rt.phase === 'listening' ? 'Talk, then pause' : 'One moment'}
+      {rt.error && <p className="error">{rt.error}</p>}
+
+      {running ? (
+        <>
+          <section className={`vu vu--${rt.phase}`} aria-live="polite">
+            <span className="vu__lamp" aria-hidden="true" />
+            <span className="vu__text">
+              <strong className="vu__state">
+                {rt.phase === 'listening' ? 'Listening' : rt.phase === 'thinking' ? 'Thinking' : 'Speaking'}
+              </strong>
+              <span className="vu__hint">
+                {rt.phase === 'listening' ? 'Talk, then pause' : 'One moment'}
+              </span>
             </span>
-          </span>
-        </section>
-      )}
+          </section>
 
-      {rt.transcript.length > 0 && (
-        <div className="transcript">
-          {rt.transcript.map((line, i) => (
-            <article key={i} className={`said said--${line.role === 'you' ? 'learner' : 'interviewer'}`}>
-              <p className="said__text">{line.text}</p>
-            </article>
-          ))}
-        </div>
-      )}
+          <div className="transcript">
+            {rt.transcript.length === 0 && (
+              <p className="transcript__empty">Say something to begin.</p>
+            )}
+            {rt.transcript.map((line, i) => (
+              <article key={i} className={`said said--${line.role === 'you' ? 'learner' : 'interviewer'}`}>
+                <p className="said__text">{line.text}</p>
+              </article>
+            ))}
+          </div>
 
-      {rt.phase === 'loading' && (
+          <div className="live__controls">
+            <button type="button" className="ghost" onClick={() => void rt.stop()}>
+              End session
+            </button>
+          </div>
+        </>
+      ) : rt.phase === 'loading' ? (
         <section className="card">
           <h2>Getting the model</h2>
+          {/* A real denominator from the first byte: the manifest knows the
+              total before anything starts, so this never lurches. */}
+          <div className="meter" role="progressbar" aria-valuenow={Math.round(percent)}>
+            <span className="meter__fill" style={{ width: `${percent}%` }} />
+          </div>
           <p className="muted small">
-            {downloaded > 0 && `${downloaded} files already on disk. `}
-            {totalBytes > 0 &&
-              `${(loadedBytes / 1_073_741_824).toFixed(2)} of ${(totalBytes / 1_073_741_824).toFixed(2)} GB`}
+            {gb(rt.loaded)} of {gb(rt.expected)} · {Math.round(percent)}%
           </p>
-          {inFlight.map((f) => (
-            <p key={f.file} className="muted small">
-              {f.file} — {Math.round((f.loaded / (f.total ?? 1)) * 100)}%
+          {latest && (
+            <p className="muted small">
+              {latest.kind === 'checking' && `Checking ${latest.file}…`}
+              {latest.kind === 'cached' && `${latest.file} already on disk`}
+              {latest.kind === 'downloading' && `Downloading ${latest.file}`}
+              {latest.kind === 'saving' && `Saving ${latest.file}`}
+              {latest.kind === 'compiling' && `Compiling ${latest.file} for the GPU — this is slow`}
+              {latest.kind === 'failed' && `${latest.file}: ${latest.reason}`}
             </p>
-          ))}
+          )}
+          <button type="button" className="ghost" onClick={rt.cancel}>
+            Cancel
+          </button>
         </section>
-      )}
+      ) : (
+        <section className="card">
+          <h2>Before it can run</h2>
+          <ol className="gates">
+            <li className={`gate ${gates.device.checked ? (gates.device.ok ? 'gate--ok' : 'gate--blocked') : ''}`}>
+              <span className="gate__mark" aria-hidden="true">
+                {gates.device.checked ? (gates.device.ok ? '✓' : '!') : '·'}
+              </span>
+              <span className="gate__body">
+                <strong>This machine can run it</strong>
+                <span className="muted small">
+                  {!gates.device.checked
+                    ? 'Checking for WebGPU…'
+                    : gates.device.ok
+                      ? 'WebGPU is available.'
+                      : gates.device.detail}
+                </span>
+              </span>
+            </li>
 
-      <section className="card">
-        <h2>Where the model goes</h2>
-        {rt.folder ? (
-          <p className="destination__current">
-            Files live in <strong>{rt.folder.name}</strong>
-            {rt.survey && rt.survey.missing === 0 && ' — complete, nothing to download'}
-            {rt.survey && rt.survey.missing > 0 && ` — ${rt.survey.present} of ${rt.survey.present + rt.survey.missing} present`}
-          </p>
-        ) : (
-          <p className="muted small">
-            Two gigabytes is not something to download twice. Pick a folder and the weights
-            stay there — on the next visit, choose the same folder and nothing is fetched.
-          </p>
-        )}
-        {canChoose && (
+            <li className={`gate ${done('location') ? 'gate--ok' : rt.gate === 'location' ? 'gate--current' : ''}`}>
+              <span className="gate__mark" aria-hidden="true">{done('location') ? '✓' : '·'}</span>
+              <span className="gate__body">
+                <strong>Somewhere to keep {gb(rt.model.downloadMb * 1_048_576)}</strong>
+                {gates.location.name ? (
+                  <span className="muted small">
+                    {gates.location.needsPermission
+                      ? `${gates.location.name} — reconnect to use it`
+                      : `Files live in ${gates.location.name}`}
+                  </span>
+                ) : (
+                  <span className="muted small">
+                    {gates.location.supported
+                      ? 'Pick a folder. Browser storage gets reclaimed; a folder does not, and the next session finds it here.'
+                      : 'This browser has no folder picker, so the weights go to browser storage and may be reclaimed.'}
+                  </span>
+                )}
+                {gates.location.supported && (
+                  <span className="gate__actions">
+                    {gates.location.needsPermission && (
+                      <button type="button" className="secondary" onClick={() => void rt.reconnect()}>
+                        Reconnect
+                      </button>
+                    )}
+                    <button type="button" className="secondary" onClick={() => void rt.pickFolder()}>
+                      {gates.location.name ? 'Choose a different folder' : 'Choose a folder'}
+                    </button>
+                  </span>
+                )}
+              </span>
+            </li>
+
+            <li className={`gate ${survey ? 'gate--ok' : ''}`}>
+              <span className="gate__mark" aria-hidden="true">{survey ? '✓' : '·'}</span>
+              <span className="gate__body">
+                <strong>The model files</strong>
+                <span className="muted small">
+                  {!survey
+                    ? 'Choose a folder and this will say what is already there.'
+                    : gates.files.summary}
+                </span>
+                {/* Corrupt is said separately from missing: one downloads, the
+                    other is replaced, and merging them makes a re-download look
+                    like the app forgetting what it had. */}
+                {survey && survey.corrupt.length > 0 && (
+                  <span className="muted small">
+                    {survey.corrupt.length} file
+                    {survey.corrupt.length === 1 ? ' was' : 's were'} left incomplete by an
+                    interrupted download and will be fetched again.
+                  </span>
+                )}
+              </span>
+            </li>
+          </ol>
+
           <button
             type="button"
-            className="secondary"
-            onClick={async () => {
-              const handle = await chooseModelFolder();
-              if (handle) await rt.chooseFolder(handle);
-            }}
+            className="hero__go"
+            disabled={rt.gate !== 'ready'}
+            onClick={() => void rt.start()}
           >
-            {rt.folder ? 'Choose a different folder' : 'Choose a folder'}
+            {survey && survey.missing.length === 0 && survey.corrupt.length === 0
+              ? 'Start talking'
+              : 'Download and start'}
           </button>
-        )}
-        {!canChoose && (
-          <p className="muted small">
-            This browser cannot offer a folder picker, so the weights go to browser storage and
-            may be reclaimed. Chrome or Edge keeps them where you put them.
-          </p>
-        )}
-      </section>
+          {rt.gate !== 'ready' && (
+            <p className="hero__blocked">
+              {rt.gate === 'device'
+                ? 'This machine cannot run the model yet.'
+                : rt.gate === 'location'
+                  ? 'Choose where the files go first — without it a download would not survive a reload.'
+                  : 'Checking the folder…'}
+            </p>
+          )}
+        </section>
+      )}
     </div>
   );
 }

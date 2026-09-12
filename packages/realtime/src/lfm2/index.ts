@@ -9,4 +9,5 @@ export { DecoderCache } from './cache.js';
 export { TextEmbeddings, generate, generateAudioFrame } from './generate.js';
 export type { GenerationOptions, GenerationSessions, TextLookup } from './generate.js';
 export * from './tokens.js';
+export * from './manifest.js';
 export type { AssetSource, AssetProgress, SessionLike, TensorFactory, TensorLike } from './runtime.js';

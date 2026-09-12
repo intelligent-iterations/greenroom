@@ -1,95 +1,197 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AutoTokenizer } from '@huggingface/transformers';
-import { LFM_MODELS, LfmAudioStage, type LfmModelSpec } from 'greenroom-realtime/lfm2';
-import { FolderAssetSource, surveyFolder } from '../voice/lfm-assets.js';
+import {
+  LFM_MODELS,
+  LfmAudioStage,
+  summarise,
+  type FolderSurvey,
+  type LfmModelSpec,
+} from 'greenroom-realtime/lfm2';
+import { FolderAssetSource, surveyFolder, type LoadStep } from '../voice/lfm-assets.js';
 import { createSession, requireWebGpu, tensorFactory } from '../voice/lfm-runtime.js';
+import {
+  chooseModelFolder,
+  grantModelFolder,
+  restoreModelFolder,
+  supportsModelFolder,
+} from '../voice/model-store.js';
 import { logEvent } from '../voice/diagnostics.js';
 
 /**
- * The in-browser speech-to-speech session.
+ * Setting up a two-gigabyte model, as a sequence rather than a button.
  *
- * Kept apart from `useSession`, which orchestrates the cascade. The two are
- * different architectures — one model versus three, one latency versus three —
- * and folding them into one hook would mean a pile of branches inside every
- * method. ADR 0002 makes the same argument about the interfaces; this is that
- * argument applied to the React layer.
+ * The first version was one button that either worked or sat there. It could
+ * start a 2GB download with nowhere to put it, it never remembered the folder
+ * between sessions — the thing the folder exists for — and while loading it
+ * showed nothing, so a working download and a hung one looked identical.
+ *
+ * This is the same work expressed as four gates, each of which can be checked,
+ * reported, and repaired on its own: can this machine run it, where do the
+ * files go, are they there, and then talk. Nothing proceeds past a gate it has
+ * not satisfied.
  */
 
+export type SetupGate = 'device' | 'location' | 'files' | 'ready';
+
 export type RealtimePhase =
-  | 'idle'
-  | 'checking'
-  | 'blocked'
-  | 'needs-folder'
-  | 'ready-to-load'
+  | 'setup'
   | 'loading'
   | 'listening'
   | 'thinking'
   | 'speaking'
   | 'error';
 
-export interface RealtimeFile {
-  file: string;
-  loaded: number;
-  total?: number;
-  cached?: boolean;
+export interface GateState {
+  device: { checked: boolean; ok: boolean; detail?: string };
+  location: {
+    folder?: FileSystemDirectoryHandle;
+    name?: string;
+    needsPermission: boolean;
+    supported: boolean;
+  };
+  files: { survey?: FolderSurvey; summary?: string };
 }
 
 export function useRealtime() {
-  const [phase, setPhase] = useState<RealtimePhase>('idle');
-  const [message, setMessage] = useState<string>();
+  const [phase, setPhase] = useState<RealtimePhase>('setup');
+  const [error, setError] = useState<string>();
   const [model, setModel] = useState<LfmModelSpec>(LFM_MODELS[0] as LfmModelSpec);
-  const [folder, setFolder] = useState<FileSystemDirectoryHandle>();
-  const [survey, setSurvey] = useState<{ present: number; missing: number; bytes: number }>();
-  const [files, setFiles] = useState<Map<string, RealtimeFile>>(new Map());
+  const [steps, setSteps] = useState<LoadStep[]>([]);
+  const [loaded, setLoaded] = useState(0);
+  const [expected, setExpected] = useState(0);
   const [transcript, setTranscript] = useState<{ role: 'you' | 'agent'; text: string }[]>([]);
+  const [gates, setGates] = useState<GateState>({
+    device: { checked: false, ok: false },
+    location: { needsPermission: false, supported: supportsModelFolder() },
+    files: {},
+  });
 
   const stageRef = useRef<LfmAudioStage | undefined>(undefined);
   const audioRef = useRef<AudioContext | undefined>(undefined);
   const micRef = useRef<MediaStream | undefined>(undefined);
+  const abortRef = useRef<AbortController | undefined>(undefined);
   const playheadRef = useRef(0);
+  const bytesPerFile = useRef(new Map<string, number>());
 
-  /** Ask for the folder, and report what is already in it. */
-  const chooseFolder = useCallback(
-    async (handle: FileSystemDirectoryHandle) => {
-      setFolder(handle);
-      const found = await surveyFolder(handle, model.suffix);
-      setSurvey({ present: found.present.length, missing: found.missing.length, bytes: found.bytes });
-      setPhase(found.missing.length === 0 ? 'ready-to-load' : 'ready-to-load');
-      setMessage(
-        found.missing.length === 0
-          ? `All ${found.present.length} files are already here. Nothing to download.`
-          : `${found.present.length} of ${found.present.length + found.missing.length} files present; the rest will download.`,
-      );
+  /** Check the device once, unprompted: it gates everything and costs nothing. */
+  useEffect(() => {
+    void requireWebGpu().then((result) => {
+      setGates((g) => ({
+        ...g,
+        device: {
+          checked: true,
+          ok: result.ok,
+          ...(result.ok ? {} : { detail: result.reason }),
+        },
+      }));
+    });
+  }, []);
+
+  /**
+   * Offer back the folder from last time.
+   *
+   * This is the continuity the whole folder mechanism exists for, and its
+   * absence was the defect: without it every session started by asking where to
+   * put two gigabytes that were already on disk.
+   */
+  useEffect(() => {
+    if (!supportsModelFolder()) return;
+    void restoreModelFolder().then(async (found) => {
+      if (!found) return;
+      setGates((g) => ({
+        ...g,
+        location: {
+          folder: found.handle,
+          name: found.handle.name,
+          needsPermission: found.needsPermission,
+          supported: true,
+        },
+      }));
+      // A lapsed permission cannot be re-granted without a gesture, so the
+      // survey waits rather than failing every read and reporting "missing".
+      if (!found.needsPermission) await refreshSurvey(found.handle);
+    });
+  }, []);
+
+  const refreshSurvey = useCallback(
+    async (handle: FileSystemDirectoryHandle, suffix = model.suffix) => {
+      const survey = await surveyFolder(handle, suffix);
+      setGates((g) => ({ ...g, files: { survey, summary: summarise(survey) } }));
+      return survey;
     },
-    [model],
+    [model.suffix],
   );
 
-  const load = useCallback(async () => {
-    setPhase('checking');
-    const gpu = await requireWebGpu();
-    if (!gpu.ok) {
-      setPhase('blocked');
-      setMessage(gpu.reason);
+  const pickFolder = useCallback(async () => {
+    const handle = await chooseModelFolder();
+    if (!handle) return;
+    setGates((g) => ({
+      ...g,
+      location: { folder: handle, name: handle.name, needsPermission: false, supported: true },
+    }));
+    await refreshSurvey(handle);
+  }, [refreshSurvey]);
+
+  const reconnect = useCallback(async () => {
+    const handle = gates.location.folder;
+    if (!handle) return;
+    const granted = await grantModelFolder(handle);
+    setGates((g) => ({ ...g, location: { ...g.location, needsPermission: !granted } }));
+    if (granted) await refreshSurvey(handle);
+  }, [gates.location.folder, refreshSurvey]);
+
+  /** Which gate is still blocking, so a screen can show one thing at a time. */
+  const gate: SetupGate = !gates.device.ok
+    ? 'device'
+    : !gates.location.folder || gates.location.needsPermission
+      ? 'location'
+      : !gates.files.survey
+        ? 'files'
+        : 'ready';
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+    setPhase('setup');
+  }, []);
+
+  const start = useCallback(async () => {
+    const folder = gates.location.folder;
+    // The trap the first version had: with no folder this downloaded two
+    // gigabytes into memory and lost every byte on reload.
+    if (gates.location.supported && !folder) {
+      setError('Choose a folder first, or the download will not survive a reload.');
       return;
     }
+    if (!gates.device.ok) return;
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     setPhase('loading');
-    setMessage(undefined);
+    setError(undefined);
+    setSteps([]);
+    bytesPerFile.current.clear();
+
     try {
       const assets = new FolderAssetSource({
         repo: model.repo,
+        suffix: model.suffix,
         ...(folder ? { folder } : {}),
         createSession,
+        signal: controller.signal,
       });
+      setExpected(assets.totalBytes);
+
+      assets.onStep((step) => setSteps((s) => [...s.slice(-40), step]));
       assets.onProgress((p) => {
-        setFiles((previous) => {
-          const next = new Map(previous);
-          next.set(p.file, p);
-          return next;
-        });
+        bytesPerFile.current.set(p.file, p.loaded);
+        let total = 0;
+        for (const value of bytesPerFile.current.values()) total += value;
+        setLoaded(total);
       });
 
+      setSteps((s) => [...s, { kind: 'checking', file: 'tokenizer' }]);
       const tokenizer = await AutoTokenizer.from_pretrained(model.repo);
+
       const stage = new LfmAudioStage({
         assets,
         tensor: tensorFactory,
@@ -102,28 +204,30 @@ export function useRealtime() {
       stageRef.current = stage;
       await stage.open();
 
+      if (folder) await refreshSurvey(folder);
       void consume(stage);
       await startMic(stage);
       setPhase('listening');
-    } catch (error) {
-      logEvent('realtime.load.failed', { error: String(error) });
+    } catch (caught) {
+      if (controller.signal.aborted) {
+        setPhase('setup');
+        return;
+      }
+      logEvent('realtime.load.failed', { error: String(caught) });
+      setError(caught instanceof Error ? caught.message : String(caught));
       setPhase('error');
-      setMessage(String(error));
     }
-  }, [folder, model]);
+  }, [gates, model, refreshSurvey]);
 
   /**
    * Play chunks back to back on the AudioContext clock.
    *
-   * Scheduling against `currentTime` each time would compound the gap between
-   * chunks into audible stutter; carrying a playhead forward is what makes
-   * 320ms batches sound continuous.
+   * Scheduling each against `currentTime` compounds the gap between chunks into
+   * audible stutter; carrying a playhead forward keeps them continuous.
    */
   const play = useCallback((samples: Float32Array, sampleRate: number) => {
     const context = (audioRef.current ??= new AudioContext());
     const buffer = context.createBuffer(1, samples.length, sampleRate);
-    // Copied into a fresh view: copyToChannel rejects a Float32Array backed by
-    // a SharedArrayBuffer, which is what cross-origin isolation gives us.
     buffer.copyToChannel(new Float32Array(samples), 0);
     const source = context.createBufferSource();
     source.buffer = buffer;
@@ -150,8 +254,8 @@ export function useRealtime() {
         } else if (event.type === 'assistant_turn_complete') {
           setPhase('listening');
         } else if (event.type === 'error') {
+          setError(event.error.message);
           setPhase('error');
-          setMessage(event.error.message);
         }
       }
     },
@@ -161,7 +265,7 @@ export function useRealtime() {
   /**
    * Capture at 16kHz, which is what the mel frontend expects.
    *
-   * The AudioContext is created at that rate rather than resampled afterwards:
+   * The context is opened at that rate rather than resampled afterwards:
    * browsers default to 48kHz, and a frontend fed the wrong rate produces a
    * spectrogram that is wrong in a way nothing reports.
    */
@@ -182,14 +286,9 @@ export function useRealtime() {
       const input = event.inputBuffer.getChannelData(0);
       stage.send({ samples: new Float32Array(input), sampleRate: 16_000 });
 
-      // A simple energy gate rather than Silero: this path has no VAD of its
-      // own yet, and an obvious threshold that can be tuned beats a dependency
-      // that hides the decision.
       let energy = 0;
       for (const s of input) energy += s * s;
-      const loud = Math.sqrt(energy / input.length) > 0.015;
-
-      if (loud) {
+      if (Math.sqrt(energy / input.length) > 0.015) {
         speaking = true;
         silenceFrames = 0;
       } else if (speaking) {
@@ -211,21 +310,25 @@ export function useRealtime() {
   const stop = useCallback(async () => {
     await stageRef.current?.close();
     micRef.current?.getTracks().forEach((t) => t.stop());
-    setPhase('idle');
+    setPhase('setup');
   }, []);
 
   return {
     phase,
-    message,
+    gate,
+    gates,
+    error,
     model,
     setModel,
-    folder,
-    chooseFolder,
-    survey,
-    files: [...files.values()],
-    transcript,
-    load,
-    stop,
     models: LFM_MODELS,
+    steps,
+    loaded,
+    expected,
+    transcript,
+    pickFolder,
+    reconnect,
+    start,
+    cancel,
+    stop,
   };
 }

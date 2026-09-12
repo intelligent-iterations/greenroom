@@ -1,57 +1,88 @@
-import type { AssetProgress, AssetSource, SessionLike } from 'greenroom-realtime/lfm2';
+import {
+  expectedBytes,
+  manifestFor,
+  totalBytes,
+  type AssetProgress,
+  type AssetSource,
+  type FolderSurvey,
+  type ManifestEntry,
+  type SessionLike,
+} from 'greenroom-realtime/lfm2';
 
 /**
- * Where a 2GB model lives between sessions.
+ * Where a 2GB model lives between sessions, and how we know it arrived intact.
  *
- * The whole premise of an on-device model is that you pay for it once. Browser
- * storage cannot promise that — it is best-effort and a browser short of space
- * will reclaim the largest bucket it can find, which is exactly this one. That
- * is not hypothetical: it is the bug that made this app re-download its weights
- * on every visit until `storage.ts` was written.
+ * The first version of this trusted a file because it existed and reported
+ * progress against a total it discovered as it went. Both were wrong in ways
+ * that only show up on a real 2GB download: a truncated file was handed to ONNX
+ * Runtime and failed far from the cause, and the progress bar lurched because
+ * its denominator grew alongside its numerator.
  *
- * So a folder the person chooses is the default here rather than a power-user
- * option. Files in it are ordinary files: visible, backed up, survivable, and
- * still there when the same folder is picked again on another machine or after
- * clearing site data. On a second session the app asks for that folder back,
- * finds the weights already present, and downloads nothing.
- *
- * Anything missing falls through to the network and is written into the folder
- * as it arrives, so a partial folder is fine and an interrupted download costs
- * only what it had not yet fetched.
+ * Everything here is now judged against a manifest of exact sizes, and every
+ * step reports — including the ones that are not downloads, because a silent
+ * step is indistinguishable from a hang, and "stuck at loading the model" is
+ * precisely what a person sees when a stage forgets to say it started.
  */
 
+export type LoadStep =
+  | { kind: 'checking'; file: string }
+  | { kind: 'downloading'; file: string; loaded: number; total: number }
+  | { kind: 'cached'; file: string; bytes: number }
+  | { kind: 'saving'; file: string }
+  | { kind: 'compiling'; file: string }
+  | { kind: 'failed'; file: string; reason: string };
+
 export interface LfmAssetOptions {
-  /** Hugging Face repo, e.g. LiquidAI/LFM2.5-Audio-1.5B-ONNX. */
   repo: string;
-  /** Where to keep the files. Omitted means network every time. */
+  suffix?: string;
   folder?: FileSystemDirectoryHandle;
-  /** Creates an ONNX session. Injected so this file never imports onnxruntime. */
-  createSession(graph: ArrayBuffer, externalData: { path: string; data: ArrayBuffer }[]): Promise<SessionLike>;
+  createSession(
+    graph: ArrayBuffer,
+    externalData: { path: string; data: ArrayBuffer }[],
+  ): Promise<SessionLike>;
+  signal?: AbortSignal;
+  /** Injectable so the whole flow is testable without a network. */
+  fetchImpl?: typeof fetch;
 }
 
 export class FolderAssetSource implements AssetSource {
   #options: LfmAssetOptions;
   #listeners: ((progress: AssetProgress) => void)[] = [];
+  #steps: ((step: LoadStep) => void)[] = [];
+  #manifest: ManifestEntry[];
 
   constructor(options: LfmAssetOptions) {
     this.#options = options;
+    this.#manifest = manifestFor(options.suffix ?? '_q4');
+  }
+
+  get totalBytes(): number {
+    return totalBytes(this.#manifest);
   }
 
   onProgress(listener: (progress: AssetProgress) => void): void {
     this.#listeners.push(listener);
   }
 
+  onStep(listener: (step: LoadStep) => void): void {
+    this.#steps.push(listener);
+  }
+
   #report(progress: AssetProgress): void {
     for (const listener of this.#listeners) listener(progress);
   }
 
+  #step(step: LoadStep): void {
+    for (const listener of this.#steps) listener(step);
+  }
+
   async session(name: string): Promise<SessionLike> {
     const graph = await this.bytes(`${name}.onnx`);
-    // Weights live beside the graph as external data. ORT needs them supplied
-    // by the exact filename the graph refers to, not by path.
     const data = await this.#maybeBytes(`${name}.onnx_data`);
-    const externalData = data ? [{ path: `${name}.onnx_data`, data }] : [];
-    return this.#options.createSession(graph, externalData);
+    // Compiling a 1.2GB graph takes real time on a laptop. Announced, because
+    // otherwise this is a silent minute that reads as a freeze.
+    this.#step({ kind: 'compiling', file: name });
+    return this.#options.createSession(graph, data ? [{ path: `${name}.onnx_data`, data }] : []);
   }
 
   async bytes(name: string): Promise<ArrayBuffer> {
@@ -61,34 +92,65 @@ export class FolderAssetSource implements AssetSource {
   }
 
   async #maybeBytes(name: string): Promise<ArrayBuffer | undefined> {
-    const cached = await this.#readFolder(name);
+    this.#throwIfAborted();
+    const expected = expectedBytes(this.#manifest, name);
+
+    this.#step({ kind: 'checking', file: name });
+    const cached = await this.#readFolder(name, expected);
     if (cached) {
-      this.#report({ file: name, loaded: cached.byteLength, total: cached.byteLength, cached: true });
+      this.#step({ kind: 'cached', file: name, bytes: cached.byteLength });
+      this.#report({
+        file: name,
+        loaded: cached.byteLength,
+        total: cached.byteLength,
+        cached: true,
+      });
       return cached;
     }
 
     const url = `https://huggingface.co/${this.#options.repo}/resolve/main/onnx/${name}`;
-    const response = await fetch(url);
-    if (!response.ok) return undefined;
+    const doFetch = this.#options.fetchImpl ?? fetch;
+    const response = await doFetch(url, { ...(this.#options.signal ? { signal: this.#options.signal } : {}) });
+    if (!response.ok) {
+      // A missing optional file (not every graph has external weights) is not
+      // an error; a missing manifest file is.
+      if (expected === undefined) return undefined;
+      this.#step({ kind: 'failed', file: name, reason: `HTTP ${response.status}` });
+      throw new Error(`${name}: HTTP ${response.status}`);
+    }
 
-    const bytes = await this.#download(response, name);
+    const bytes = await this.#download(response, name, expected);
+    if (expected !== undefined && bytes.byteLength !== expected) {
+      this.#step({
+        kind: 'failed',
+        file: name,
+        reason: `expected ${expected} bytes, received ${bytes.byteLength}`,
+      });
+      throw new Error(`${name} downloaded ${bytes.byteLength} bytes, expected ${expected}`);
+    }
+
+    this.#step({ kind: 'saving', file: name });
     await this.#writeFolder(name, bytes);
     return bytes;
   }
 
-  /** Streams so progress is real rather than a spinner that jumps to 100%. */
-  async #download(response: Response, name: string): Promise<ArrayBuffer> {
-    const total = Number(response.headers.get('Content-Length') ?? 0) || undefined;
+  async #download(response: Response, name: string, expected?: number): Promise<ArrayBuffer> {
+    // Prefer the manifest over Content-Length: a CDN that omits the header, or
+    // a proxy that rewrites it, must not make the bar stop moving.
+    const declared = Number(response.headers.get('Content-Length') ?? 0) || undefined;
+    const total = expected ?? declared;
     const reader = response.body?.getReader();
     if (!reader) return response.arrayBuffer();
 
     const chunks: Uint8Array[] = [];
     let loaded = 0;
     for (;;) {
+      this.#throwIfAborted();
       const { done, value } = await reader.read();
       if (done) break;
       chunks.push(value);
       loaded += value.length;
+      this.#step({ kind: 'downloading', file: name, loaded, total: total ?? loaded });
       this.#report({ file: name, loaded, ...(total !== undefined ? { total } : {}) });
     }
 
@@ -101,29 +163,20 @@ export class FolderAssetSource implements AssetSource {
     return out.buffer;
   }
 
-  async #readFolder(name: string): Promise<ArrayBuffer | undefined> {
+  /** A folder hit must be the right size, not merely present and non-empty. */
+  async #readFolder(name: string, expected?: number): Promise<ArrayBuffer | undefined> {
     const folder = this.#options.folder;
     if (!folder) return undefined;
     try {
-      const handle = await folder.getFileHandle(name);
-      const file = await handle.getFile();
-      // A zero-byte file is the fingerprint of an interrupted write. Treating it
-      // as a hit would hand ORT an empty graph and fail somewhere far from here.
+      const file = await (await folder.getFileHandle(name)).getFile();
       if (file.size === 0) return undefined;
+      if (expected !== undefined && file.size !== expected) return undefined;
       return await file.arrayBuffer();
     } catch {
       return undefined;
     }
   }
 
-  /**
-   * Write to a `.part` name, verify, then rename.
-   *
-   * A download interrupted halfway through — a closed tab, a lost network, a
-   * process the OS killed — would otherwise leave a truncated file that the next
-   * session reads as complete. That failure presents as a corrupt model rather
-   * than a missing one, which is far harder to diagnose.
-   */
   async #writeFolder(name: string, bytes: ArrayBuffer): Promise<void> {
     const folder = this.#options.folder;
     if (!folder || bytes.byteLength === 0) return;
@@ -142,8 +195,6 @@ export class FolderAssetSource implements AssetSource {
 
       const movable = handle as FileSystemFileHandle & { move?: (to: string) => Promise<void> };
       if (!movable.move) {
-        // Without an atomic rename there is no way to publish the file safely,
-        // so decline to cache rather than store something unverifiable.
         await folder.removeEntry(temporary).catch(() => {});
         return;
       }
@@ -152,42 +203,42 @@ export class FolderAssetSource implements AssetSource {
       await folder.removeEntry(temporary).catch(() => {});
     }
   }
+
+  #throwIfAborted(): void {
+    if (this.#options.signal?.aborted) throw new DOMException('Load cancelled', 'AbortError');
+  }
 }
 
-/** Every file the stage will ask for, so a UI can report what is already present. */
-export function lfmFileNames(suffix = '_q4'): string[] {
-  const graphs = [
-    'audio_encoder',
-    'decoder',
-    'vocoder_depthformer',
-    'audio_detokenizer',
-    'audio_embedding',
-  ];
-  return [...graphs.flatMap((g) => [`${g}${suffix}.onnx`, `${g}${suffix}.onnx_data`]), 'embed_tokens.bin'];
-}
-
-/** How much of the model is already in a folder — drives "already downloaded". */
+/**
+ * What a folder already holds, checked against the manifest.
+ *
+ * This is what makes a second session honest. Existence is not enough — a
+ * half-written file would otherwise be counted as ready and the download would
+ * be skipped for something that cannot load.
+ */
 export async function surveyFolder(
   folder: FileSystemDirectoryHandle,
   suffix = '_q4',
-): Promise<{ present: string[]; missing: string[]; bytes: number }> {
-  const present: string[] = [];
-  const missing: string[] = [];
-  let bytes = 0;
+): Promise<FolderSurvey> {
+  const manifest = manifestFor(suffix);
+  const complete: ManifestEntry[] = [];
+  const missing: ManifestEntry[] = [];
+  const corrupt: { entry: ManifestEntry; actualBytes: number }[] = [];
+  let presentBytes = 0;
 
-  for (const name of lfmFileNames(suffix)) {
+  for (const entry of manifest) {
     try {
-      const file = await (await folder.getFileHandle(name)).getFile();
-      if (file.size > 0) {
-        present.push(name);
-        bytes += file.size;
-        continue;
+      const file = await (await folder.getFileHandle(entry.file)).getFile();
+      if (file.size === entry.bytes) {
+        complete.push(entry);
+        presentBytes += file.size;
+      } else {
+        corrupt.push({ entry, actualBytes: file.size });
       }
-      missing.push(name);
     } catch {
-      missing.push(name);
+      missing.push(entry);
     }
   }
 
-  return { present, missing, bytes };
+  return { complete, missing, corrupt, presentBytes, totalBytes: totalBytes(manifest) };
 }
