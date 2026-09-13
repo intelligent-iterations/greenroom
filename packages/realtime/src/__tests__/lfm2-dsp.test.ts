@@ -194,10 +194,21 @@ describe('token bookkeeping', () => {
   });
 
   it('builds the trained chat format exactly', () => {
-    const prompt = buildPrompt({ system: 'S', user: 'U' });
-    expect(prompt).toBe(
+    const { prefix, suffix } = buildPrompt({ system: 'S', user: 'U' });
+    expect(prefix + suffix).toBe(
       '<|startoftext|><|im_start|>system\nS<|im_end|>\n<|im_start|>user\nU<|im_end|>\n<|im_start|>assistant\n',
     );
+  });
+
+  it('splits so that audio lands inside the user turn', () => {
+    // The split point is the whole reason this returns two halves. Audio
+    // spliced after the assistant header reads as the model's own words, and
+    // the model answers nothing.
+    const { prefix, suffix } = buildPrompt({ system: 'S' });
+    expect(prefix.endsWith('<|im_start|>user\n')).toBe(true);
+    expect(suffix.startsWith('<|im_end|>')).toBe(true);
+    expect(suffix).toContain('<|im_start|>assistant\n');
+    expect(prefix).not.toContain('assistant');
   });
 
   it('sums codebook embeddings', () => {

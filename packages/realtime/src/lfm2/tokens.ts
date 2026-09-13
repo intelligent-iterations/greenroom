@@ -32,22 +32,40 @@ export function isAudioStart(token: number): boolean {
 /**
  * The chat format the model was trained on, from the model card.
  *
+ * Returned in two halves, and that is the point of it.
+ *
+ * The speech the model is answering is not text — it arrives as encoder
+ * embeddings, which have no token ids and so cannot be interpolated into a
+ * string. They have to be spliced into the embedding sequence *between* these
+ * halves, so the audio occupies the user turn.
+ *
+ * Getting that wrong is not a subtle degradation. Appending the audio after the
+ * whole prompt puts it past `<|im_start|>assistant`, so the model reads the
+ * user's speech as the opening of its own reply and simply continues it: the
+ * output is fluent, unrelated, and never switches to audio, because the model
+ * does not believe anyone has asked it anything. Observed as several hundred
+ * words about football tournaments in reply to a room with nobody talking.
+ *
  * Written out rather than assembled from a template helper so the exact
  * newlines are visible: they are part of the format, and a missing one shifts
  * every token after it.
  */
-export function buildPrompt(options: {
-  system: string;
-  user?: string;
-}): string {
-  const user = options.user ?? '';
-  return (
-    '<|startoftext|><|im_start|>system\n' +
-    options.system +
-    '<|im_end|>\n<|im_start|>user\n' +
-    user +
-    '<|im_end|>\n<|im_start|>assistant\n'
-  );
+export interface PromptHalves {
+  /** Everything up to and including the start of the user's turn. */
+  prefix: string;
+  /** Closes the user's turn and opens the assistant's. */
+  suffix: string;
+}
+
+export function buildPrompt(options: { system: string; user?: string }): PromptHalves {
+  return {
+    prefix:
+      '<|startoftext|><|im_start|>system\n' +
+      options.system +
+      '<|im_end|>\n<|im_start|>user\n' +
+      (options.user ?? ''),
+    suffix: '<|im_end|>\n<|im_start|>assistant\n',
+  };
 }
 
 /**

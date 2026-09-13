@@ -38,7 +38,7 @@ export interface LfmAssetOptions {
   folder?: FileSystemDirectoryHandle;
   createSession(
     graph: ArrayBuffer,
-    externalData: { path: string; data: ArrayBuffer }[],
+    externalData: { path: string; data: Blob }[],
   ): Promise<SessionLike>;
   signal?: AbortSignal;
   /** Injectable so the whole flow is testable without a network. */
@@ -73,38 +73,60 @@ export class FolderAssetSource implements AssetSource {
   }
 
   #step(step: LoadStep): void {
+    // Logged, except for download progress, which is throttled to roughly
+    // eight a second and would bury everything else. A load that stalls should
+    // leave a trail in the console saying which stage it stalled in — the lack
+    // of one is what made "stuck at loading the model" expensive to diagnose.
+    if (step.kind !== 'downloading') console.debug(`[lfm] ${step.kind} ${step.file}`);
     for (const listener of this.#steps) listener(step);
   }
 
   async session(name: string): Promise<SessionLike> {
+    // The graph is a few hundred kilobytes and ORT wants it as bytes. The
+    // weights are up to 1.16GB and must stay a Blob — see #maybeFile.
     const graph = await this.bytes(`${name}.onnx`);
-    const data = await this.#maybeBytes(`${name}.onnx_data`);
+    const data = await this.#maybeFile(`${name}.onnx_data`);
     // Compiling a 1.2GB graph takes real time on a laptop. Announced, because
     // otherwise this is a silent minute that reads as a freeze.
     this.#step({ kind: 'compiling', file: name });
     return this.#options.createSession(graph, data ? [{ path: `${name}.onnx_data`, data }] : []);
   }
 
+  /**
+   * A whole file in memory, for the one caller that genuinely needs it.
+   *
+   * embed_tokens.bin is a lookup table this code indexes into directly, so it
+   * has to be a buffer. Nothing else should use this — see #maybeFile.
+   */
   async bytes(name: string): Promise<ArrayBuffer> {
-    const found = await this.#maybeBytes(name);
+    const found = await this.#maybeFile(name);
     if (!found) throw new Error(`${name} could not be fetched`);
-    return found;
+    return await found.arrayBuffer();
   }
 
-  async #maybeBytes(name: string): Promise<ArrayBuffer | undefined> {
+  /**
+   * A file as a Blob — deliberately not as bytes.
+   *
+   * ONNX Runtime accepts external weights as a Blob and reads them itself,
+   * releasing the buffer as soon as they are in its heap. Handing it an
+   * ArrayBuffer instead means *we* hold the whole file for as long as the
+   * session lives, while ORT holds its own copy: two live gigabytes for the
+   * decoder alone, on top of the four already loaded. That is what
+   * `RuntimeError: memory access out of bounds` was — the wasm32 heap running
+   * out partway through the fifth graph, after every byte had downloaded.
+   *
+   * Measured: passing Blobs, the JS heap falls to 4MB after the decoder is
+   * compiled. Passing buffers it stays above 1.1GB and climbs.
+   */
+  async #maybeFile(name: string): Promise<Blob | undefined> {
     this.#throwIfAborted();
     const expected = expectedBytes(this.#manifest, name);
 
     this.#step({ kind: 'checking', file: name });
     const cached = await this.#readFolder(name, expected);
     if (cached) {
-      this.#step({ kind: 'cached', file: name, bytes: cached.byteLength });
-      this.#report({
-        file: name,
-        loaded: cached.byteLength,
-        total: cached.byteLength,
-        cached: true,
-      });
+      this.#step({ kind: 'cached', file: name, bytes: cached.size });
+      this.#report({ file: name, loaded: cached.size, total: cached.size, cached: true });
       return cached;
     }
 
@@ -119,27 +141,27 @@ export class FolderAssetSource implements AssetSource {
       throw new Error(`${name}: HTTP ${response.status}`);
     }
 
-    let bytes: ArrayBuffer;
+    let file: Blob;
     try {
-      bytes = await this.#downloadStreaming(response, name, expected);
+      file = await this.#downloadStreaming(response, name, expected);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.#step({ kind: 'failed', file: name, reason });
       throw error;
     }
 
-    if (expected !== undefined && bytes.byteLength !== expected) {
+    // The streaming path checks the file it wrote; this catches the buffered
+    // fallback, where nothing has been written to check.
+    if (expected !== undefined && file.size !== expected) {
       this.#step({
         kind: 'failed',
         file: name,
-        reason: `expected ${expected} bytes, received ${bytes.byteLength}`,
+        reason: `expected ${expected} bytes, received ${file.size}`,
       });
-      throw new Error(`${name} downloaded ${bytes.byteLength} bytes, expected ${expected}`);
+      throw new Error(`${name} downloaded ${file.size} bytes, expected ${expected}`);
     }
 
-    // Already written by the streaming path when a folder is available.
-    if (!this.#options.folder) await this.#writeFolder(name, bytes);
-    return bytes;
+    return file;
   }
 
   /**
@@ -152,19 +174,20 @@ export class FolderAssetSource implements AssetSource {
    * swaps, and a download that is thrashing is indistinguishable from one that
    * has hung. That is what "stuck downloading" was.
    *
-   * Writing each chunk straight through keeps the peak at one chunk. Reading
-   * the finished file back costs the file once, which is unavoidable: ONNX
-   * Runtime takes external weights as an in-memory buffer.
+   * Writing each chunk straight through keeps the peak at one chunk. The
+   * finished file is then handed back as a Blob and never read into memory at
+   * all — ORT takes external weights as a Blob, so the bytes go from disk into
+   * its heap without passing through ours.
    */
   async #downloadStreaming(
     response: Response,
     name: string,
     expected?: number,
-  ): Promise<ArrayBuffer> {
+  ): Promise<Blob> {
     const declared = Number(response.headers.get('Content-Length') ?? 0) || undefined;
     const total = expected ?? declared;
     const reader = response.body?.getReader();
-    if (!reader) return response.arrayBuffer();
+    if (!reader) return await response.blob();
 
     const folder = this.#options.folder;
     const temporary = `${name}.part`;
@@ -216,13 +239,10 @@ export class FolderAssetSource implements AssetSource {
     this.#report({ file: name, loaded, ...(total !== undefined ? { total } : {}) });
 
     if (!writable) {
-      const out = new Uint8Array(loaded);
-      let at = 0;
-      for (const chunk of buffered) {
-        out.set(chunk, at);
-        at += chunk.length;
-      }
-      return out.buffer;
+      // No folder to stream into. A Blob built from the chunks is still better
+      // than a concatenated buffer: the browser may back it with disk, and the
+      // chunks become collectible as soon as this returns.
+      return new Blob(buffered as BlobPart[]);
     }
 
     await writable.close();
@@ -238,55 +258,30 @@ export class FolderAssetSource implements AssetSource {
     if (!movable.move) {
       // Without an atomic rename the file cannot be published safely, so it is
       // returned but not kept — correct this run, downloaded again the next.
-      const bytes = await written.arrayBuffer();
       await folder!.removeEntry(temporary).catch(() => {});
-      return bytes;
+      return written;
     }
 
     await movable.move(name);
-    return (await handle!.getFile()).arrayBuffer();
+    return await handle!.getFile();
   }
 
   /** A folder hit must be the right size, not merely present and non-empty. */
-  async #readFolder(name: string, expected?: number): Promise<ArrayBuffer | undefined> {
+  async #readFolder(name: string, expected?: number): Promise<File | undefined> {
     const folder = this.#options.folder;
     if (!folder) return undefined;
     try {
       const file = await (await folder.getFileHandle(name)).getFile();
       if (file.size === 0) return undefined;
       if (expected !== undefined && file.size !== expected) return undefined;
-      return await file.arrayBuffer();
+      // The File, not its bytes: a 1.16GB cache hit should cost nothing until
+      // something actually reads it, and for weights nothing ever does.
+      return file;
     } catch {
       return undefined;
     }
   }
 
-  async #writeFolder(name: string, bytes: ArrayBuffer): Promise<void> {
-    const folder = this.#options.folder;
-    if (!folder || bytes.byteLength === 0) return;
-
-    const temporary = `${name}.part`;
-    try {
-      const handle = await folder.getFileHandle(temporary, { create: true });
-      const writable = await handle.createWritable();
-      await writable.write(new Uint8Array(bytes));
-      await writable.close();
-
-      if ((await handle.getFile()).size !== bytes.byteLength) {
-        await folder.removeEntry(temporary).catch(() => {});
-        return;
-      }
-
-      const movable = handle as FileSystemFileHandle & { move?: (to: string) => Promise<void> };
-      if (!movable.move) {
-        await folder.removeEntry(temporary).catch(() => {});
-        return;
-      }
-      await movable.move(name);
-    } catch {
-      await folder.removeEntry(temporary).catch(() => {});
-    }
-  }
 
   #throwIfAborted(): void {
     if (this.#options.signal?.aborted) throw new DOMException('Load cancelled', 'AbortError');

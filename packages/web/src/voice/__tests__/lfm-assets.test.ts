@@ -350,3 +350,118 @@ describe('FolderAssetSource', () => {
     await expect(source.session('not_in_manifest')).rejects.toThrow();
   });
 });
+
+describe('weights reach the runtime without passing through memory', () => {
+  /**
+   * The bug that survived the download being fixed.
+   *
+   * Every file downloaded, byte-exact, and then the fifth session failed with
+   * `RuntimeError: memory access out of bounds`. The cause was this layer
+   * handing ONNX Runtime an ArrayBuffer: ORT copies it into the wasm heap and
+   * we keep ours, so 1.7GB of weights costs 3.4GB of live memory and the
+   * wasm32 address space runs out.
+   *
+   * These tests assert the *type* that crosses the boundary, because that is
+   * the whole defect. A test that only checks the bytes arrive — which is what
+   * every test above does — passes either way.
+   */
+  it('hands the runtime a Blob, never a buffer', async () => {
+    const folder = new FakeDirectoryHandle();
+    for (const entry of LFM_Q4_MANIFEST) put(folder, entry.file, entry.bytes);
+
+    const seen: { path: string; data: unknown }[] = [];
+    const spy = vi.fn(async (_graph: ArrayBuffer, external: { path: string; data: Blob }[]) => {
+      seen.push(...external);
+      return { inputNames: [], outputNames: [], run: async () => ({}) };
+    });
+
+    const source = new FolderAssetSource({
+      repo: 'test/repo',
+      folder: folder as never,
+      createSession: spy as never,
+    });
+
+    await source.session('decoder_q4');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.path).toBe('decoder_q4.onnx_data');
+    expect(seen[0]?.data).toBeInstanceOf(Blob);
+    expect(seen[0]?.data).not.toBeInstanceOf(ArrayBuffer);
+    expect((seen[0]?.data as Blob).size).toBe(
+      LFM_Q4_MANIFEST.find((e) => e.file === 'decoder_q4.onnx_data')!.bytes,
+    );
+  });
+
+  it('does not read a cached weights file to serve it', async () => {
+    // A 1.16GB cache hit that calls arrayBuffer() has already lost. The file is
+    // handed over unread and only ORT decides when to pull the bytes.
+    const folder = new FakeDirectoryHandle();
+    for (const entry of LFM_Q4_MANIFEST) put(folder, entry.file, entry.bytes);
+
+    const weights = folder.files.get('decoder_q4.onnx_data')!;
+    let reads = 0;
+    Object.defineProperty(weights, 'arrayBuffer', {
+      value: () => {
+        reads += 1;
+        return Promise.resolve(new ArrayBuffer(0));
+      },
+    });
+
+    const source = new FolderAssetSource({
+      repo: 'test/repo',
+      folder: folder as never,
+      createSession: vi.fn(async () => ({
+        inputNames: [],
+        outputNames: [],
+        run: async () => ({}),
+      })) as never,
+    });
+
+    await source.session('decoder_q4');
+    expect(reads).toBe(0);
+  });
+
+  it('still gives embed_tokens.bin as bytes, because it is indexed directly', async () => {
+    const folder = new FakeDirectoryHandle();
+    put(folder, 'embed_tokens.bin', 536_870_912);
+
+    const source = new FolderAssetSource({
+      repo: 'test/repo',
+      folder: folder as never,
+      createSession,
+    });
+
+    const bytes = await source.bytes('embed_tokens.bin');
+    expect(bytes).toBeInstanceOf(ArrayBuffer);
+    expect(bytes.byteLength).toBe(536_870_912);
+  });
+
+  it('hands over a downloaded file as a Blob too, not only a cached one', async () => {
+    const folder = new FakeDirectoryHandle();
+    const seen: { path: string; data: unknown }[] = [];
+    const byName = vi.fn(async (url: string) => {
+      const name = url.split('/').pop() as string;
+      const size = LFM_Q4_MANIFEST.find((e) => e.file === name)?.bytes ?? 0;
+      return new Response(new Uint8Array(size), {
+        headers: { 'Content-Length': String(size) },
+      });
+    }) as unknown as typeof fetch;
+
+    const source = new FolderAssetSource({
+      repo: 'test/repo',
+      folder: folder as never,
+      fetchImpl: byName,
+      createSession: (async (_g: ArrayBuffer, external: { path: string; data: Blob }[]) => {
+        seen.push(...external);
+        return { inputNames: [], outputNames: [], run: async () => ({}) };
+      }) as never,
+    });
+
+    await source.session('audio_detokenizer_q4');
+
+    expect(seen[0]?.data).toBeInstanceOf(Blob);
+    expect((seen[0]?.data as Blob).size).toBe(
+      LFM_Q4_MANIFEST.find((e) => e.file === 'audio_detokenizer_q4.onnx_data')!.bytes,
+    );
+  });
+});

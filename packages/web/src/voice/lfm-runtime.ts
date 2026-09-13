@@ -43,16 +43,21 @@ export const tensorFactory: TensorFactory = (type, data, dims) =>
   new ort.Tensor(type, data as never, dims as number[]) as unknown as TensorLike;
 
 /**
- * Create a session from bytes already in hand.
+ * Create a session from a graph in hand and its weights on disk.
  *
- * Bytes rather than a URL, because the whole point of the folder store is that
- * the weights may never have touched the network this run. ORT accepts external
- * data as in-memory buffers, which is what makes a folder-backed model possible
- * at all.
+ * Local rather than a URL, because the whole point of the folder store is that
+ * the weights may never touch the network this run.
+ *
+ * The weights are a **Blob**, and that is load-bearing rather than incidental.
+ * ORT reads a Blob itself and drops the buffer once the bytes are in its heap;
+ * given an ArrayBuffer it keeps ours alive alongside its own copy. Across five
+ * graphs totalling 1.7GB of weights that difference is the whole wasm32 address
+ * space, and the symptom is `RuntimeError: memory access out of bounds` on the
+ * fifth session — long after the download everyone was looking at had finished.
  */
 export async function createSession(
   graph: ArrayBuffer,
-  externalData: { path: string; data: ArrayBuffer }[],
+  externalData: { path: string; data: Blob }[],
   onSlow?: (elapsedMs: number) => void,
 ): Promise<SessionLike> {
   const slow = setTimeout(() => onSlow?.(SLOW_COMPILE_MS), SLOW_COMPILE_MS);
@@ -65,16 +70,15 @@ export async function createSession(
 
 async function create(
   graph: ArrayBuffer,
-  externalData: { path: string; data: ArrayBuffer }[],
+  externalData: { path: string; data: Blob }[],
 ): Promise<SessionLike> {
   const session = await ort.InferenceSession.create(new Uint8Array(graph), {
     executionProviders: ['webgpu'],
     ...(externalData.length > 0
       ? {
-          externalData: externalData.map((e) => ({
-            path: e.path,
-            data: new Uint8Array(e.data),
-          })),
+          // Passed through untouched. Reading it here would reintroduce the
+          // second live copy this whole path exists to avoid.
+          externalData: externalData.map((e) => ({ path: e.path, data: e.data })),
         }
       : {}),
   } as ort.InferenceSession.SessionOptions);

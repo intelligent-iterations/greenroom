@@ -44,9 +44,21 @@ export interface LfmStageOptions {
   decode(tokens: number[]): string | Promise<string>;
   suffix?: string;
   systemPrompt?: string;
+  /**
+   * Text sampling temperature.
+   *
+   * Defaults to a little above zero rather than to greedy. Pure argmax on this
+   * model degenerates: after a perfectly good opening line it falls into
+   * repeating encyclopedia fragments until the step limit, which is both
+   * useless and the slowest possible way to produce nothing. There was no way
+   * to set this at all before — `generate()` accepted it and nothing passed it.
+   */
+  textTemperature?: number;
   audioTemperature?: number;
   audioTopK?: number;
   maxSteps?: number;
+  /** Injectable randomness, so a sampled turn can be reproduced in a test. */
+  random?: () => number;
 }
 
 /**
@@ -68,6 +80,18 @@ export const LFM_CAPABILITIES: DuplexCapabilities = {
   nativeBargeIn: false,
 };
 
+/**
+ * The longest utterance kept before the oldest audio is dropped.
+ *
+ * Generous for speech — nobody says one sentence for half a minute — and small
+ * enough that a forgotten open microphone cannot grow a buffer until the tab
+ * dies.
+ */
+const MAX_PENDING_SAMPLES = INPUT_SAMPLE_RATE * 30;
+
+/** Low enough to stay on topic, high enough to break a repetition loop. */
+export const DEFAULT_TEXT_TEMPERATURE = 0.3;
+
 const GRAPHS = [
   'audio_encoder',
   'decoder',
@@ -86,7 +110,10 @@ export class LfmAudioStage implements DuplexVoiceStage {
   #textEmbeddings?: TextEmbeddings;
   #cache?: DecoderCache;
   #pending: Float32Array[] = [];
+  #pendingSamples = 0;
   #turn?: AbortController;
+  /** The turn currently generating, if any. See respond(). */
+  #active?: Promise<void>;
   #open = false;
   #systemPrompt: string;
 
@@ -151,6 +178,13 @@ export class LfmAudioStage implements DuplexVoiceStage {
       return;
     }
     this.#pending.push(chunk.samples);
+    this.#pendingSamples += chunk.samples.length;
+    // A microphone that is never endpointed would otherwise buffer without
+    // limit. The model takes an utterance, not a recording of the afternoon,
+    // so the oldest audio goes first.
+    while (this.#pendingSamples > MAX_PENDING_SAMPLES && this.#pending.length > 1) {
+      this.#pendingSamples -= this.#pending.shift()!.length;
+    }
   }
 
   /**
@@ -161,13 +195,46 @@ export class LfmAudioStage implements DuplexVoiceStage {
    * that. Here the caller does, and pretending otherwise would hide it.
    */
   async respond(): Promise<void> {
+    if (!this.#open) return;
+
+    // One turn at a time, and the wait is the whole point.
+    //
+    // Generation is autoregressive over a single mutable DecoderCache. Two
+    // turns running at once interleave their writes into it, so the second
+    // one is decoding against a cache the first is still advancing — and both
+    // hold a full set of intermediate tensors. Observed as
+    // `RuntimeError: memory access out of bounds` a few seconds into the first
+    // conversation, because an endpoint detector that fires every five seconds
+    // will happily start a second turn while the first is still speaking.
+    //
+    // Aborting without awaiting is not enough: abort only asks, and the loop
+    // finishes its current step. So the new turn waits for the old one to
+    // actually stop before touching the cache.
+    const previous = this.#active;
+    this.#turn?.abort();
+    if (previous) await previous.catch(() => {});
     if (!this.#open || !this.#cache) return;
 
+    const run = this.#runTurn(this.#cache);
+    this.#active = run;
+    try {
+      await run;
+    } finally {
+      if (this.#active === run) this.#active = undefined;
+    }
+  }
+
+  /** True while a turn is generating. */
+  get busy(): boolean {
+    return this.#active !== undefined;
+  }
+
+  async #runTurn(cache: DecoderCache): Promise<void> {
     const audio = concat(this.#pending);
     this.#pending = [];
+    this.#pendingSamples = 0;
     if (audio.length === 0) return;
 
-    this.#turn?.abort();
     const turn = new AbortController();
     this.#turn = turn;
 
@@ -185,7 +252,7 @@ export class LfmAudioStage implements DuplexVoiceStage {
           depthformer: this.#session('vocoder_depthformer'),
           audioEmbedding: this.#session('audio_embedding'),
         },
-        this.#cache,
+        cache,
         promptEmbeds.data,
         promptEmbeds.length,
         this.#options.tensor,
@@ -213,6 +280,8 @@ export class LfmAudioStage implements DuplexVoiceStage {
         },
         {
           signal: turn.signal,
+          textTemperature: this.#options.textTemperature ?? DEFAULT_TEXT_TEMPERATURE,
+          ...(this.#options.random ? { random: this.#options.random } : {}),
           ...(this.#options.audioTemperature !== undefined
             ? { audioTemperature: this.#options.audioTemperature }
             : {}),
@@ -248,16 +317,23 @@ export class LfmAudioStage implements DuplexVoiceStage {
     const audioEmbeds = encoded['audio_embeddings']?.data as Float32Array;
     const audioPositions = (encoded['audio_embeddings']?.dims[1] ?? 0) as number;
 
-    const prompt = buildPrompt({ system: this.#systemPrompt });
-    const ids = await this.#options.encode(prompt);
-    const textEmbeds = this.#textEmbeddings?.lookup(ids) ?? new Float32Array(ids.length * HIDDEN_SIZE);
-
     // The encoded speech sits where the user's words would be, which is what
-    // makes this end-to-end rather than a transcription pasted into a prompt.
-    const total = ids.length + audioPositions;
+    // makes this end-to-end rather than a transcription pasted into a prompt —
+    // and it has to be *between* the halves, not after them. See buildPrompt.
+    const { prefix, suffix } = buildPrompt({ system: this.#systemPrompt });
+    const prefixIds = await this.#options.encode(prefix);
+    const suffixIds = await this.#options.encode(suffix);
+    const lookup = (ids: number[]): Float32Array =>
+      this.#textEmbeddings?.lookup(ids) ?? new Float32Array(ids.length * HIDDEN_SIZE);
+
+    const total = prefixIds.length + audioPositions + suffixIds.length;
     const data = new Float32Array(total * HIDDEN_SIZE);
-    data.set(textEmbeds, 0);
-    data.set(audioEmbeds.subarray(0, audioPositions * HIDDEN_SIZE), ids.length * HIDDEN_SIZE);
+    data.set(lookup(prefixIds), 0);
+    data.set(
+      audioEmbeds.subarray(0, audioPositions * HIDDEN_SIZE),
+      prefixIds.length * HIDDEN_SIZE,
+    );
+    data.set(lookup(suffixIds), (prefixIds.length + audioPositions) * HIDDEN_SIZE);
 
     return { data, length: total };
   }
@@ -300,6 +376,11 @@ export class LfmAudioStage implements DuplexVoiceStage {
   async close(): Promise<void> {
     this.#open = false;
     this.#turn?.abort();
+    // Awaited, so a caller that closes and then unloads cannot release the
+    // sessions out from under a turn that is still running on them.
+    await this.#active?.catch(() => {});
+    this.#pending = [];
+    this.#pendingSamples = 0;
     this.#queue.close();
   }
 
