@@ -14,6 +14,8 @@ import { istft } from './istft.js';
 import { buildPrompt } from './tokens.js';
 import {
   FRAME_DURATION_MS,
+  INTERLEAVED_SYSTEM_PROMPT,
+  TTS_SYSTEM_PROMPT,
   HIDDEN_SIZE,
   INPUT_SAMPLE_RATE,
   NUM_CODEBOOKS,
@@ -89,8 +91,16 @@ export const LFM_CAPABILITIES: DuplexCapabilities = {
  */
 const MAX_PENDING_SAMPLES = INPUT_SAMPLE_RATE * 30;
 
-/** Low enough to stay on topic, high enough to break a repetition loop. */
-export const DEFAULT_TEXT_TEMPERATURE = 0.3;
+/**
+ * Release the event loop.
+ *
+ * A macrotask, deliberately — `await Promise.resolve()` drains microtasks and
+ * the browser still never paints. This is what keeps the tab usable while a
+ * reply generates, and what lets already-generated audio actually start
+ * playing instead of queueing up behind the rest of the turn.
+ */
+const releaseEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
 
 const GRAPHS = [
   'audio_encoder',
@@ -119,7 +129,7 @@ export class LfmAudioStage implements DuplexVoiceStage {
 
   constructor(options: LfmStageOptions) {
     this.#options = options;
-    this.#systemPrompt = options.systemPrompt ?? 'Respond conversationally with audio.';
+    this.#systemPrompt = options.systemPrompt ?? INTERLEAVED_SYSTEM_PROMPT;
   }
 
   async load(onProgress?: (progress: DuplexLoadProgress) => void): Promise<void> {
@@ -277,10 +287,14 @@ export class LfmAudioStage implements DuplexVoiceStage {
             // where a listener hears a gap.
             if (frames.length % 4 === 0) void this.#emitAudio(frames.splice(0, 4));
           },
+          onDone: (summary) => this.#reportTurn(summary),
         },
         {
           signal: turn.signal,
-          textTemperature: this.#options.textTemperature ?? DEFAULT_TEXT_TEMPERATURE,
+          yield: releaseEventLoop,
+          ...(this.#options.textTemperature !== undefined
+            ? { textTemperature: this.#options.textTemperature }
+            : {}),
           ...(this.#options.random ? { random: this.#options.random } : {}),
           ...(this.#options.audioTemperature !== undefined
             ? { audioTemperature: this.#options.audioTemperature }
@@ -362,6 +376,103 @@ export class LfmAudioStage implements DuplexVoiceStage {
       chunk: { samples, sampleRate: OUTPUT_SAMPLE_RATE },
       at: performance.now(),
     });
+  }
+
+  /**
+   * Speak a line of text, using the same weights.
+   *
+   * The model's TTS mode, which the reference drives with its own system
+   * instruction and a text user turn — no audio in, audio out. It shares every
+   * session and the whole audio path with `respond()`, so it is also the
+   * shortest way to find out whether this pipeline can make a sound at all
+   * without needing a microphone or a person.
+   *
+   * Serialised against a conversational turn for the same reason those are
+   * serialised against each other: one DecoderCache.
+   */
+  async speak(text: string, options: { voice?: string; maxSteps?: number } = {}): Promise<void> {
+    if (!this.#open) return;
+    const previous = this.#active;
+    this.#turn?.abort();
+    if (previous) await previous.catch(() => {});
+    if (!this.#open || !this.#cache) return;
+
+    const run = this.#runSpeech(text, options.voice ?? TTS_SYSTEM_PROMPT, options.maxSteps);
+    this.#active = run;
+    try {
+      await run;
+    } finally {
+      if (this.#active === run) this.#active = undefined;
+    }
+  }
+
+  async #runSpeech(text: string, system: string, maxSteps?: number): Promise<void> {
+    const turn = new AbortController();
+    this.#turn = turn;
+    // A fresh cache: this is a new conversation turn, not a continuation.
+    this.#resetCache();
+
+    try {
+      const { prefix, suffix } = buildPrompt({ system, user: text });
+      const ids = [
+        ...(await this.#options.encode(prefix)),
+        ...(await this.#options.encode(suffix)),
+      ];
+      const embeds =
+        this.#textEmbeddings?.lookup(ids) ?? new Float32Array(ids.length * HIDDEN_SIZE);
+
+      const frames: number[][] = [];
+      await generate(
+        {
+          decoder: this.#session('decoder'),
+          depthformer: this.#session('vocoder_depthformer'),
+          audioEmbedding: this.#session('audio_embedding'),
+        },
+        this.#cache as DecoderCache,
+        embeds,
+        ids.length,
+        this.#options.tensor,
+        (token) => this.#textEmbeddings?.lookup([token]) ?? new Float32Array(HIDDEN_SIZE),
+        {
+          onAudioFrame: (codes) => {
+            frames.push(codes);
+            if (frames.length % 4 === 0) void this.#emitAudio(frames.splice(0, 4));
+          },
+          onDone: (summary) => this.#reportTurn(summary),
+        },
+        {
+          signal: turn.signal,
+          yield: releaseEventLoop,
+          textTemperature: 0.7,
+          audioTemperature: 0.7,
+          ...(maxSteps !== undefined ? { maxSteps } : {}),
+        },
+      );
+
+      if (frames.length > 0) await this.#emitAudio(frames);
+      this.#queue.push({ type: 'assistant_turn_complete', at: performance.now() });
+    } catch (error) {
+      this.#queue.push({
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+        at: performance.now(),
+      });
+    }
+  }
+
+  /**
+   * Say why a turn produced no sound, when it produced none.
+   *
+   * Silence with no explanation is what made this expensive to chase: the
+   * model answering in text forever and the audio path throwing on its first
+   * frame look identical from outside.
+   */
+  #reportTurn(summary: { steps: number; frames: number; reachedAudio: boolean }): void {
+    if (summary.frames > 0) return;
+    const reason = summary.reachedAudio
+      ? 'the model switched to audio but produced no frames'
+      : 'the model answered in text and never switched to audio';
+    console.debug(`[lfm] turn produced no audio after ${summary.steps} steps: ${reason}`);
   }
 
   events(): AsyncIterable<DuplexEvent> {

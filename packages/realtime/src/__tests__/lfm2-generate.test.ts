@@ -5,8 +5,12 @@ import type { SessionLike, TensorLike, TensorData } from '../lfm2/runtime.js';
 import {
   AUDIO_START_TOKEN,
   END_OF_AUDIO,
+  END_OF_TEXT_TOKEN,
   HIDDEN_SIZE,
+  IM_END_TOKEN,
   NUM_CODEBOOKS,
+  TEXT_END_TOKEN,
+  TEXT_START_TOKEN,
   TEXT_VOCAB,
 } from '../lfm2/config.js';
 
@@ -221,8 +225,65 @@ describe('generate', () => {
     expect(result.frames).toBe(2);
   });
 
+  it('stops the turn on <|im_end|> instead of running to the step limit', async () => {
+    // The defect: the loop had no stop condition but maxSteps, so a reply that
+    // was finished after one sentence carried on for hundreds of tokens and
+    // never reached the audio it was asked for.
+    const decoder = fakeDecoder([200, 201, IM_END_TOKEN, 202, 203]);
+    const text: number[] = [];
+    const result = await generate(
+      { decoder, depthformer: fakeDepthformer(END_OF_AUDIO), audioEmbedding: fakeAudioEmbedding },
+      new DecoderCache(decoder, factory),
+      new Float32Array(4 * HIDDEN_SIZE),
+      4,
+      factory,
+      lookup,
+      { onText: (t) => text.push(t) },
+      { maxSteps: 50, audioTemperature: 0 },
+    );
+
+    expect(text).toEqual([200, 201]);
+    expect(result.steps).toBe(2);
+  });
+
+  it('stops on <|endoftext|> as well', async () => {
+    const decoder = fakeDecoder([200, END_OF_TEXT_TOKEN, 201]);
+    const text: number[] = [];
+    await generate(
+      { decoder, depthformer: fakeDepthformer(END_OF_AUDIO), audioEmbedding: fakeAudioEmbedding },
+      new DecoderCache(decoder, factory),
+      new Float32Array(4 * HIDDEN_SIZE),
+      4,
+      factory,
+      lookup,
+      { onText: (t) => text.push(t) },
+      { maxSteps: 50, audioTemperature: 0 },
+    );
+    expect(text).toEqual([200]);
+  });
+
+  it('does not hand the text markers to the caller as words', async () => {
+    // <|text_start|> and <|text_end|> are structure. Emitted, they reach a
+    // transcript and a synthesiser as literal angle brackets.
+    const decoder = fakeDecoder([TEXT_START_TOKEN, 200, TEXT_END_TOKEN, IM_END_TOKEN]);
+    const text: number[] = [];
+    await generate(
+      { decoder, depthformer: fakeDepthformer(END_OF_AUDIO), audioEmbedding: fakeAudioEmbedding },
+      new DecoderCache(decoder, factory),
+      new Float32Array(4 * HIDDEN_SIZE),
+      4,
+      factory,
+      lookup,
+      { onText: (t) => text.push(t) },
+      { maxSteps: 50, audioTemperature: 0 },
+    );
+    expect(text).toEqual([200]);
+  });
+
   it('grows the attention mask by one position per step', async () => {
-    const decoder = fakeDecoder([1, 2, 3]);
+    // Ordinary word tokens. 2 is <|endoftext|> and 7 is <|im_end|>, either of
+    // which legitimately ends the turn before the third step.
+    const decoder = fakeDecoder([200, 201, 202]);
     await generate(
       { decoder, depthformer: fakeDepthformer(END_OF_AUDIO), audioEmbedding: fakeAudioEmbedding },
       new DecoderCache(decoder, factory),

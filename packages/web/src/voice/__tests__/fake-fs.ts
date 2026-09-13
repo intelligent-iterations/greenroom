@@ -66,6 +66,8 @@ function fakeWritable(
 }
 
 export class FakeFileHandle {
+  readonly kind = 'file' as const;
+
   constructor(
     public name: string,
     private dir: FakeDirectoryHandle,
@@ -97,6 +99,7 @@ export class FakeFileHandle {
 }
 
 export class FakeDirectoryHandle {
+  readonly kind = 'directory' as const;
   files = new Map<string, File>();
   dirs = new Map<string, FakeDirectoryHandle>();
   supportsMove: boolean | undefined = true;
@@ -126,6 +129,18 @@ export class FakeDirectoryHandle {
 
   async removeEntry(name: string): Promise<void> {
     this.files.delete(name);
+  }
+
+  /**
+   * Enumerate children, as the real handle does.
+   *
+   * Yields the handles themselves — `values()` returns FileSystemHandle
+   * objects, so a caller that narrows on `kind` and then uses the result as a
+   * directory is doing the right thing and must be able to.
+   */
+  async *values(): AsyncIterableIterator<FakeDirectoryHandle | FakeFileHandle> {
+    for (const name of this.files.keys()) yield new FakeFileHandle(name, this);
+    for (const dir of this.dirs.values()) yield dir;
   }
 
   /** Every file below this directory, as `a/b/c.onnx`. */

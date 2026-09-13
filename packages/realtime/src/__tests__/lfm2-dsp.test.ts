@@ -13,6 +13,7 @@ import {
   argmax,
   audioTokenIds,
   buildPrompt,
+  clampAudioCodes,
   isEndOfAudio,
   sampleTopK,
   sumCodebookEmbeddings,
@@ -187,10 +188,22 @@ describe('token bookkeeping', () => {
     ]);
   });
 
-  it('detects end-of-audio in any codebook', () => {
+  it('ends the segment on codebook zero, matching the reference loop', () => {
     expect(isEndOfAudio([2048, 0, 0, 0, 0, 0, 0, 0])).toBe(true);
-    expect(isEndOfAudio([0, 0, 0, 0, 0, 0, 0, 2048])).toBe(true);
     expect(isEndOfAudio([0, 1, 2, 3, 4, 5, 6, 7])).toBe(false);
+    // The change that matters: a residual codebook carrying the marker is not
+    // the end of speech. Treating it as one truncated the reply, sometimes to
+    // nothing at all — the model's first frame is the one that decides whether
+    // anything is heard.
+    expect(isEndOfAudio([0, 0, 0, 0, 0, 0, 0, 2048])).toBe(false);
+  });
+
+  it('clamps a frame into the range the detokenizer can decode', () => {
+    // A residual codebook carrying 2048 is a legal embedding input but not a
+    // waveform. The reference clips rather than dropping the frame, which
+    // keeps the audio's timing intact.
+    expect(clampAudioCodes([0, 0, 0, 0, 0, 0, 0, 2048])).toEqual([0, 0, 0, 0, 0, 0, 0, 2047]);
+    expect(clampAudioCodes([1, 2, 3, 4, 5, 6, 7, 8])).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it('builds the trained chat format exactly', () => {

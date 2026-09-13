@@ -1,3 +1,4 @@
+import { rfftFast } from './fft.js';
 import { MEL_CONFIG } from './config.js';
 
 /**
@@ -99,23 +100,11 @@ export function hannWindow(length: number): Float32Array {
  * starting with the fast one.
  */
 export function rfft(frame: Float32Array): { re: Float32Array; im: Float32Array } {
-  const n = frame.length;
-  const bins = n / 2 + 1;
-  const re = new Float32Array(bins);
-  const im = new Float32Array(bins);
-  for (let k = 0; k < bins; k++) {
-    let sumRe = 0;
-    let sumIm = 0;
-    for (let t = 0; t < n; t++) {
-      const angle = (-2 * Math.PI * k * t) / n;
-      const sample = frame[t] as number;
-      sumRe += sample * Math.cos(angle);
-      sumIm += sample * Math.sin(angle);
-    }
-    re[k] = sumRe;
-    im[k] = sumIm;
-  }
-  return { re, im };
+  // Delegated to fft.ts. This was a direct O(n^2) DFT with two trig calls in
+  // the inner loop; at the 512-point analysis window that is ~65 million calls
+  // for a five-second utterance, which is most of the delay before a reply
+  // starts. fft.ts is checked against the version this replaced.
+  return rfftFast(frame);
 }
 
 export interface MelResult {

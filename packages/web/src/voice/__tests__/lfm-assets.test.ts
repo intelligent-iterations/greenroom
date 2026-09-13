@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FolderAssetSource, surveyFolder, type LoadStep } from '../lfm-assets.js';
+import {
+  FolderAssetSource,
+  resolveModelFolder,
+  surveyFolder,
+  type LoadStep,
+} from '../lfm-assets.js';
 import { FakeDirectoryHandle, fakeFile } from './fake-fs.js';
 import { LFM_Q4_MANIFEST, totalBytes } from 'greenroom-realtime/lfm2';
 
@@ -462,6 +467,71 @@ describe('weights reach the runtime without passing through memory', () => {
     expect(seen[0]?.data).toBeInstanceOf(Blob);
     expect((seen[0]?.data as Blob).size).toBe(
       LFM_Q4_MANIFEST.find((e) => e.file === 'audio_detokenizer_q4.onnx_data')!.bytes,
+    );
+  });
+});
+
+describe('resolveModelFolder', () => {
+  it('uses the chosen folder when the files are in it', async () => {
+    const folder = new FakeDirectoryHandle();
+    for (const entry of LFM_Q4_MANIFEST) put(folder, entry.file, entry.bytes);
+
+    expect(await resolveModelFolder(folder as never)).toBe(folder);
+  });
+
+  it('looks one level down when the parent was picked', async () => {
+    // The mistake this exists for: picking ~/Documents when the model is in
+    // ~/Documents/models. Every file reads as missing and two gigabytes are
+    // downloaded onto a disk that already has them.
+    const parent = new FakeDirectoryHandle('Documents');
+    const child = await parent.getDirectoryHandle('models', { create: true });
+    for (const entry of LFM_Q4_MANIFEST) put(child, entry.file, entry.bytes);
+
+    const resolved = await resolveModelFolder(parent as never);
+    expect(resolved.name).toBe('models');
+
+    const survey = await surveyFolder(resolved as never);
+    expect(survey.missing).toHaveLength(0);
+  });
+
+  it('refuses to guess between two candidates', async () => {
+    // Two folders that both look right means the user meant something that
+    // cannot be inferred. Better to survey what they picked and report it
+    // honestly than to silently load the wrong copy.
+    const parent = new FakeDirectoryHandle('Documents');
+    for (const name of ['a', 'b']) {
+      const child = await parent.getDirectoryHandle(name, { create: true });
+      for (const entry of LFM_Q4_MANIFEST) put(child, entry.file, entry.bytes);
+    }
+
+    expect((await resolveModelFolder(parent as never)).name).toBe('Documents');
+  });
+
+  it('returns the chosen folder when nothing below it matches', async () => {
+    const parent = new FakeDirectoryHandle('Downloads');
+    const child = await parent.getDirectoryHandle('holiday-photos', { create: true });
+    put(child, 'IMG_0001.jpg', 4096);
+
+    expect((await resolveModelFolder(parent as never)).name).toBe('Downloads');
+  });
+
+  it('ignores a subfolder holding only a truncated file', async () => {
+    // Presence is not enough anywhere else in this file and must not be here.
+    const parent = new FakeDirectoryHandle('Documents');
+    const child = await parent.getDirectoryHandle('models', { create: true });
+    child.files.set('audio_encoder_q4.onnx', fakeFile(new Uint8Array(), 'audio_encoder_q4.onnx'));
+
+    expect((await resolveModelFolder(parent as never)).name).toBe('Documents');
+  });
+});
+
+describe('manifestFor', () => {
+  it('refuses a precision whose sizes were never recorded', async () => {
+    // It used to return an empty list, so the survey found nothing missing and
+    // the UI said "Every file is here. Nothing to download." over no files at
+    // all — then asked for filenames that do not exist.
+    await expect(surveyFolder(new FakeDirectoryHandle() as never, '_fp16')).rejects.toThrow(
+      /_fp16/,
     );
   });
 });

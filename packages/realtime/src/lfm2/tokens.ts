@@ -1,4 +1,6 @@
-import { AUDIO_START_TOKEN, CODEBOOK_VOCAB, END_OF_AUDIO, NUM_CODEBOOKS } from './config.js';
+import { AUDIO_START_TOKEN, CODEBOOK_VOCAB, END_OF_AUDIO, NUM_CODEBOOKS,
+  MAX_AUDIO_CODE,
+} from './config.js';
 
 /**
  * Token bookkeeping for the interleaved text/audio stream.
@@ -20,9 +22,30 @@ export function audioTokenIds(frameCodes: readonly number[]): number[] {
   return frameCodes.map((code, codebook) => codebook * CODEBOOK_VOCAB + code);
 }
 
-/** End-of-audio is 2048 in any codebook; the first is what the loop watches. */
+/**
+ * The frame that ends the spoken segment.
+ *
+ * Codebook zero, matching the reference loop. This used to test every codebook,
+ * which reads like the more careful choice and is not: the residual codebooks
+ * occasionally carry 2048 in the middle of speech, and treating that as the end
+ * truncates the reply — sometimes to nothing at all. Those frames are dropped
+ * by `carriesEndMarker` rather than ending the turn.
+ */
 export function isEndOfAudio(frameCodes: readonly number[]): boolean {
-  return frameCodes.some((code) => code === END_OF_AUDIO);
+  return frameCodes[0] === END_OF_AUDIO;
+}
+
+/**
+ * Clamp a frame into the range the detokenizer can actually decode.
+ *
+ * A residual codebook sometimes carries 2048 mid-utterance. It is a valid input
+ * to the audio embedding — the codebook vocabulary is 2049 wide — but it is not
+ * a waveform, and the detokenizer has no code for it. The reference clips to
+ * 0..2047 before decoding, which keeps the frame and its timing; dropping it
+ * would leave a hole in the audio.
+ */
+export function clampAudioCodes(frameCodes: readonly number[]): number[] {
+  return frameCodes.map((code) => (code > MAX_AUDIO_CODE ? MAX_AUDIO_CODE : code < 0 ? 0 : code));
 }
 
 export function isAudioStart(token: number): boolean {

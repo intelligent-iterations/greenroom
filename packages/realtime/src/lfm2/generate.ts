@@ -1,6 +1,13 @@
 import {
   AUDIO_START_TOKEN,
   CODEBOOK_VOCAB,
+  END_OF_TEXT_TOKEN,
+  IM_END_TOKEN,
+  REFERENCE_AUDIO_TEMPERATURE,
+  REFERENCE_AUDIO_TOP_K,
+  REFERENCE_TEXT_TEMPERATURE,
+  TEXT_END_TOKEN,
+  TEXT_START_TOKEN,
   DEPTHFORMER_HEADS,
   DEPTHFORMER_HEAD_DIM,
   DEPTHFORMER_LAYERS,
@@ -11,7 +18,14 @@ import {
 } from './config.js';
 import { DecoderCache } from './cache.js';
 import type { SessionLike, TensorFactory, TensorLike } from './runtime.js';
-import { argmax, audioTokenIds, isEndOfAudio, sampleTopK, sumCodebookEmbeddings } from './tokens.js';
+import {
+  argmax,
+  audioTokenIds,
+  clampAudioCodes,
+  isEndOfAudio,
+  sampleTopK,
+  sumCodebookEmbeddings,
+} from './tokens.js';
 
 /**
  * The interleaved text/audio generation loop.
@@ -36,6 +50,13 @@ export interface GenerationSessions {
 
 export interface GenerationOptions {
   maxSteps?: number;
+  /**
+   * Called once per step to release the event loop. See the loop body.
+   *
+   * Injected rather than hardcoded so tests run at full speed and a caller on
+   * a worker thread, which does not need it, can leave it out.
+   */
+  yield?: () => Promise<void>;
   /** Greedy by default: text that wanders is worse than text that is dull. */
   textTemperature?: number;
   /** Audio wants sampling; greedy audio is flat and buzzy. */
@@ -50,6 +71,14 @@ export interface GenerationHandlers {
   onText?(token: number): void;
   /** One 80ms frame of audio codes, ready for the detokenizer. */
   onAudioFrame?(codes: number[]): void;
+  /**
+   * The turn is over, with the two numbers that explain a silent one.
+   *
+   * "No audio came out" has two quite different causes — the model never left
+   * text mode, or it switched and produced nothing — and they need different
+   * fixes. Reported rather than logged, so a caller decides what to do with it.
+   */
+  onDone?(summary: { steps: number; frames: number; reachedAudio: boolean }): void;
 }
 
 /**
@@ -102,22 +131,41 @@ export async function generateAudioFrame(
   tensor: TensorFactory,
   options: GenerationOptions = {},
 ): Promise<number[]> {
-  const temperature = options.audioTemperature ?? 0.8;
-  const topK = options.audioTopK ?? 64;
+  const temperature = options.audioTemperature ?? REFERENCE_AUDIO_TEMPERATURE;
+  const topK = options.audioTopK ?? REFERENCE_AUDIO_TOP_K;
 
   let depthSlices = tensor('float32', new Float32Array(NUM_CODEBOOKS * DEPTH_SLICE_WIDTH), [
     1,
     NUM_CODEBOOKS,
     DEPTH_SLICE_WIDTH,
   ]);
-  let pastKeys = tensor('float32', new Float32Array(0), [
+  // Allocated at full width, once, and never regrown.
+  //
+  // `seqlens_k` and `total_seq_len` are ONNX Runtime's GroupQueryAttention
+  // inputs, and that operator's contract is a cache big enough for the whole
+  // sequence which it updates *in place*, with seqlens_k saying how much of it
+  // is real. Growing a cache from zero the way the decoder's does is the wrong
+  // shape of idea entirely, and ORT says so on the very first codebook:
+  //
+  //   Shape mismatch attempting to re-use buffer. {1,8,0,32} != {1,8,1,32}
+  //
+  // Every audio frame failed there, so the model never produced a sound — and
+  // because the failure was inside a turn, it surfaced as an error banner
+  // rather than as silence with a cause.
+  //
+  // The sequence here is the codebook axis, not time, so its full width is
+  // exactly NUM_CODEBOOKS.
+  const cacheSize =
+    DEPTHFORMER_LAYERS * DEPTHFORMER_HEADS * NUM_CODEBOOKS * DEPTHFORMER_HEAD_DIM;
+  const cacheDims = [
     DEPTHFORMER_LAYERS,
     1,
     DEPTHFORMER_HEADS,
-    0,
+    NUM_CODEBOOKS,
     DEPTHFORMER_HEAD_DIM,
-  ]);
-  let pastValues = pastKeys;
+  ];
+  let pastKeys = tensor('float32', new Float32Array(cacheSize), cacheDims);
+  let pastValues = tensor('float32', new Float32Array(cacheSize), cacheDims);
 
   const codes: number[] = [];
   let previous = 0;
@@ -140,6 +188,9 @@ export async function generateAudioFrame(
     codes.push(code);
     previous = code;
 
+    // Handed straight back: GroupQueryAttention writes into the cache it was
+    // given, so these are the same buffers and copying them would only throw
+    // the update away.
     depthSlices = outputs['depth_slices'] as TensorLike;
     pastKeys = outputs['new_keys'] as TensorLike;
     pastValues = outputs['new_values'] as TensorLike;
@@ -147,6 +198,7 @@ export async function generateAudioFrame(
 
   return codes;
 }
+
 
 /**
  * Run the backbone until the turn ends.
@@ -165,7 +217,9 @@ export async function generate(
   handlers: GenerationHandlers = {},
   options: GenerationOptions = {},
 ): Promise<{ steps: number; frames: number }> {
-  const maxSteps = options.maxSteps ?? 1024;
+  // The reference caps an interleaved turn at 300. A conversational reply that
+  // has not finished by then is not going to.
+  const maxSteps = options.maxSteps ?? 300;
   let embeds = tensor('float32', promptEmbeds, [1, promptLength, HIDDEN_SIZE]);
   let total = promptLength;
   let inAudioMode = false;
@@ -174,6 +228,17 @@ export async function generate(
 
   for (; steps < maxSteps; steps++) {
     if (options.signal?.aborted) break;
+
+    // Hand the event loop back between steps.
+    //
+    // ONNX Runtime's WebGPU path is single-threaded glue on the main thread,
+    // and awaiting it only yields microtasks — which never let the browser
+    // paint, never deliver a click, and never let a scheduled AudioBuffer
+    // start. A three hundred step reply therefore froze the tab solid for
+    // minutes and the audio it had already produced stayed silent until the
+    // end. A macrotask each step gives back control; it costs well under a
+    // millisecond against a step that costs tens.
+    await options.yield?.();
 
     const outputs = await sessions.decoder.run({
       inputs_embeds: embeds,
@@ -195,7 +260,11 @@ export async function generate(
       const codes = await generateAudioFrame(sessions.depthformer, lastHidden, tensor, options);
       if (isEndOfAudio(codes)) break;
 
-      handlers.onAudioFrame?.(codes);
+      // Clamped on the way out, raw on the way back in. A residual codebook
+      // carrying 2048 is a legal embedding input — the vocabulary is 2049 wide
+      // — but not a waveform, so the reference clips before decoding. Dropping
+      // the frame instead would leave a hole in the audio.
+      handlers.onAudioFrame?.(clampAudioCodes(codes));
       frames += 1;
 
       const ids = audioTokenIds(codes);
@@ -212,15 +281,21 @@ export async function generate(
     } else {
       const logits = outputs['logits']?.data as Float32Array;
       const vocabOffset = (sequence - 1) * TEXT_VOCAB;
-      const temperature = options.textTemperature ?? 0;
+      const temperature = options.textTemperature ?? REFERENCE_TEXT_TEMPERATURE;
       const token =
         temperature > 0
           ? sampleTopK(logits, vocabOffset, TEXT_VOCAB, temperature, 50, options.random)
           : argmax(logits, vocabOffset, TEXT_VOCAB);
 
+      // The turn is over. Without this the loop had no stop condition but the
+      // step limit, so every reply ran on until it exhausted it.
+      if (token === IM_END_TOKEN || token === END_OF_TEXT_TOKEN) break;
+
       if (token === AUDIO_START_TOKEN) {
         inAudioMode = true;
-      } else {
+      } else if (token !== TEXT_START_TOKEN && token !== TEXT_END_TOKEN) {
+        // The text markers are structure, not words. Emitting them puts
+        // "<|text_end|>" in front of a person, or through a synthesiser.
         handlers.onText?.(token);
       }
 
@@ -233,5 +308,9 @@ export async function generate(
     total += 1;
   }
 
+  // One line per turn. A reply that produced no audio is the failure this
+  // whole path kept having, and the two numbers that distinguish its causes —
+  // never switched modes, or switched and generated nothing — are these.
+  handlers.onDone?.({ steps, frames, reachedAudio: inAudioMode });
   return { steps, frames };
 }

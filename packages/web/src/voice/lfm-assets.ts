@@ -295,6 +295,58 @@ export class FolderAssetSource implements AssetSource {
  * half-written file would otherwise be counted as ready and the download would
  * be skipped for something that cannot load.
  */
+/**
+ * The folder the model files are actually in, which may be one level down.
+ *
+ * Picking the *parent* of the download folder is an easy mistake and an
+ * invisible one: the survey reports every file missing and two gigabytes are
+ * fetched again onto a disk that already has them. So when the chosen folder
+ * holds none of the manifest but exactly one of its subdirectories does, that
+ * subdirectory is used.
+ *
+ * Deliberately one level and deliberately unambiguous. Walking a whole tree
+ * turns a folder picker into a filesystem search, and picking between two
+ * candidates would be guessing which model someone meant.
+ */
+export async function resolveModelFolder(
+  folder: FileSystemDirectoryHandle,
+  suffix = '_q4',
+): Promise<FileSystemDirectoryHandle> {
+  const manifest = manifestFor(suffix);
+  const probe = manifest.find((entry) => entry.role === 'graph') ?? manifest[0];
+  if (!probe) return folder;
+
+  const has = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
+    try {
+      return (await (await dir.getFileHandle(probe.file)).getFile()).size > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await has(folder)) return folder;
+
+  const iterable = folder as FileSystemDirectoryHandle & {
+    values?: () => AsyncIterableIterator<FileSystemHandle>;
+  };
+  if (!iterable.values) return folder;
+
+  const matches: FileSystemDirectoryHandle[] = [];
+  try {
+    for await (const entry of iterable.values()) {
+      if (entry.kind !== 'directory') continue;
+      const child = entry as FileSystemDirectoryHandle;
+      if (await has(child)) matches.push(child);
+      // Two candidates is ambiguous and three is a search; stop either way.
+      if (matches.length > 1) return folder;
+    }
+  } catch {
+    return folder;
+  }
+
+  return matches[0] ?? folder;
+}
+
 export async function surveyFolder(
   folder: FileSystemDirectoryHandle,
   suffix = '_q4',

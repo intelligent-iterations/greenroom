@@ -418,8 +418,11 @@ describe('LfmAudioStage sampling', () => {
     stage.send(speech(1));
     await stage.respond();
 
-    // Greedy would have taken AUDIO_START_TOKEN and emitted no text at all.
-    expect(emitted).toContain(RUNNER_UP);
+    // Greedy would have taken AUDIO_START_TOKEN, switched to audio mode, and
+    // emitted no text at all. Which token sampling lands on is not the point —
+    // that it sampled at all is.
+    expect(emitted.length).toBeGreaterThan(0);
+    expect(emitted).not.toContain(AUDIO_START_TOKEN);
     await stage.close();
   }, 20_000);
 

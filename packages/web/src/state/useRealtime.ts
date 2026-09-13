@@ -7,7 +7,12 @@ import {
   type FolderSurvey,
   type LfmModelSpec,
 } from 'greenroom-realtime/lfm2';
-import { FolderAssetSource, surveyFolder, type LoadStep } from '../voice/lfm-assets.js';
+import {
+  FolderAssetSource,
+  resolveModelFolder,
+  surveyFolder,
+  type LoadStep,
+} from '../voice/lfm-assets.js';
 import { createSession, requireWebGpu, tensorFactory } from '../voice/lfm-runtime.js';
 import {
   chooseModelFolder,
@@ -145,14 +150,18 @@ export function useRealtime() {
   );
 
   const pickFolder = useCallback(async () => {
-    const handle = await chooseModelFolder();
-    if (!handle) return;
+    const chosen = await chooseModelFolder();
+    if (!chosen) return;
+    // Someone who picks the parent of their download folder has still pointed
+    // at the files; re-fetching two gigabytes because of one level of nesting
+    // is the worst possible reading of that gesture.
+    const handle = await resolveModelFolder(chosen, model.suffix);
     setGates((g) => ({
       ...g,
       location: { folder: handle, name: handle.name, needsPermission: false, supported: true },
     }));
     await refreshSurvey(handle);
-  }, [refreshSurvey]);
+  }, [refreshSurvey, model.suffix]);
 
   const reconnect = useCallback(async () => {
     const handle = gates.location.folder;
@@ -272,6 +281,14 @@ export function useRealtime() {
       await stage.load();
       stageRef.current = stage;
       await stage.open();
+      // A handle on the live stage, for the console.
+      //
+      // This path has several failure modes that are invisible from the UI —
+      // a turn that produces text but never audio, a depthformer that throws
+      // on its first frame — and each one cost a rebuild to see. `speak()` in
+      // particular exercises the whole audio path without needing a
+      // microphone or a person, which is the only practical way to test it.
+      (globalThis as { greenroomStage?: unknown }).greenroomStage = stage;
 
       if (folder) await refreshSurvey(folder);
       void consume(stage);

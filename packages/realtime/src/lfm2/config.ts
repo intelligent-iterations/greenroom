@@ -27,17 +27,53 @@ export const NUM_CODEBOOKS = 8;
  */
 export const CODEBOOK_VOCAB = 2049;
 export const END_OF_AUDIO = 2048;
+/** The largest code the detokenizer can turn into sound. */
+export const MAX_AUDIO_CODE = 2047;
 
 /** Text vocabulary. From embed_tokens.json. */
 export const TEXT_VOCAB = 65536;
 
 /**
- * Switches the decoder from emitting text to emitting audio frames.
+ * Control tokens, read from the model's own tokenizer_config.json.
  *
- * The README's reference loop compares the sampled token against 128 to enter
- * audio mode.
+ * Verified against `added_tokens_decoder`, not inferred:
+ *   7 = <|im_end|>, 128 = <|audio_start|>, 129 = <|text_start|>,
+ *   130 = <|text_end|>, 2 = <|endoftext|>.
+ *
+ * IM_END is the one whose absence was expensive. Without a turn-ending token
+ * the generation loop had no stop condition at all except the step limit, so
+ * every reply ran to hundreds of tokens — a good opening sentence followed by
+ * whatever the model free-associated into, and it never reached the audio it
+ * was asked for. The README's WebGPU snippet omits it; the reference
+ * implementation in Liquid4All/onnx-export breaks on it.
  */
 export const AUDIO_START_TOKEN = 128;
+export const TEXT_START_TOKEN = 129;
+export const TEXT_END_TOKEN = 130;
+export const IM_END_TOKEN = 7;
+export const END_OF_TEXT_TOKEN = 2;
+
+/**
+ * The system instruction that actually produces speech.
+ *
+ * Taken verbatim from the reference implementation's interleaved mode, and it
+ * is not interchangeable with a paraphrase: an invented instruction like
+ * "Respond conversationally with audio" leaves the model answering in text
+ * forever, which is indistinguishable from the audio pipeline being broken.
+ */
+export const INTERLEAVED_SYSTEM_PROMPT = 'Respond with interleaved text and audio.';
+
+/** The reference's TTS instruction, and its default voice. */
+export const TTS_SYSTEM_PROMPT = 'Perform TTS. Use the UK female voice.';
+
+/**
+ * Sampling, from the reference implementation's interleaved mode.
+ *
+ * text_temperature=1.0, audio_temperature=1.0, audio_top_k=4.
+ */
+export const REFERENCE_TEXT_TEMPERATURE = 1.0;
+export const REFERENCE_AUDIO_TEMPERATURE = 1.0;
+export const REFERENCE_AUDIO_TOP_K = 4;
 
 /** Input side. From onnx/mel_config.json. */
 export const INPUT_SAMPLE_RATE = 16_000;
@@ -99,10 +135,15 @@ export interface LfmModelSpec {
 /**
  * What can actually be run.
  *
- * Only the 1.5B is listed as verified-available, because it is the one whose
- * files were checked byte by byte. The card is explicit that WebGPU wants the
- * q4 decoder and q4 vocoder and that q8 is not supported there, so q8 is absent
- * rather than offered and broken.
+ * One entry, because one entry works. An FP16 build was listed here and could
+ * never have loaded: `manifestFor` knows only `_q4`, so its survey found no
+ * files, reported "Every file is here. Nothing to download." over an empty
+ * manifest, and then asked for filenames that do not exist. Its decoder also
+ * splits weights across `decoder_fp16.onnx_data` *and* `..._data_1`, which the
+ * single-external-file assumption here cannot express at all.
+ *
+ * The card is explicit that WebGPU wants the q4 decoder and q4 vocoder and that
+ * q8 is not supported there, so q8 is absent rather than offered and broken.
  *
  * Larger LFM2.5-Audio checkpoints slot in here unchanged when their ONNX
  * exports appear — same graph names, same protocol, different weights. The
@@ -121,14 +162,5 @@ export const LFM_MODELS: LfmModelSpec[] = [
     downloadMb: 2166,
     vramMb: 2600,
     notes: 'End-to-end speech in, speech out. The recommended WebGPU build.',
-  },
-  {
-    id: 'lfm2.5-audio-1.5b-fp16',
-    label: 'LFM2.5 Audio 1.5B (FP16)',
-    repo: 'LiquidAI/LFM2.5-Audio-1.5B-ONNX',
-    suffix: '_fp16',
-    downloadMb: 3900,
-    vramMb: 4600,
-    notes: 'Higher quality, roughly twice the download. Wants a large GPU.',
   },
 ];

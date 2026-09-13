@@ -42,9 +42,14 @@ export const LFM_Q4_MANIFEST: ManifestEntry[] = [
 
 export function manifestFor(suffix: string): ManifestEntry[] {
   if (suffix === '_q4') return LFM_Q4_MANIFEST;
-  // Other precisions exist but their sizes have not been recorded, and a
-  // guessed size is worse than none: it would reject good files as corrupt.
-  return [];
+  // Other precisions exist but their sizes have not been recorded. Returning an
+  // empty list was worse than useless: a survey over no files reports that
+  // every file is present, so the UI said "Nothing to download" and then tried
+  // to download everything. An unknown precision is a programming error here,
+  // and should say so where it happens.
+  throw new Error(
+    `No manifest for precision "${suffix}". Only "_q4" has verified file sizes.`,
+  );
 }
 
 export function totalBytes(manifest: readonly ManifestEntry[]): number {

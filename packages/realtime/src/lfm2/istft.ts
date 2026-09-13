@@ -1,3 +1,4 @@
+import { irfftFast } from './fft.js';
 import { ISTFT_CONFIG, OUTPUT_SAMPLE_RATE } from './config.js';
 
 /**
@@ -33,19 +34,11 @@ function hann(length: number): Float32Array {
  * an obvious failure.
  */
 export function irfft(re: Float32Array, im: Float32Array, nFft: number): Float32Array {
-  const out = new Float32Array(nFft);
-  const bins = nFft / 2 + 1;
-  for (let t = 0; t < nFft; t++) {
-    let sum = (re[0] as number) * 0.5;
-    const nyquist = bins - 1;
-    sum += (re[nyquist] as number) * 0.5 * Math.cos(Math.PI * t);
-    for (let k = 1; k < nyquist; k++) {
-      const angle = (2 * Math.PI * k * t) / nFft;
-      sum += (re[k] as number) * Math.cos(angle) - (im[k] as number) * Math.sin(angle);
-    }
-    out[t] = (2 * sum) / nFft;
-  }
-  return out;
+  // Delegated to fft.ts. As a direct summation this was ~1.6 million trig
+  // calls per frame at nFft=1280, and a 320ms chunk of speech is two dozen
+  // frames — synthesis ran slower than realtime on the main thread and locked
+  // the tab. fft.ts is checked against the version this replaced.
+  return irfftFast(re, im, nFft);
 }
 
 /**
