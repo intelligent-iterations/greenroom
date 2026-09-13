@@ -10,6 +10,35 @@ import type { SessionLike, TensorFactory, TensorLike } from 'greenroom-realtime/
  * happens in the package, where it is covered by tests.
  */
 
+/**
+ * Single-threaded WASM, deliberately.
+ *
+ * This page is cross-origin isolated, so ONNX Runtime picks the threaded build
+ * and defaults to one worker per core. Combined with the WebGPU execution
+ * provider's JSEP glue that deadlocks: `InferenceSession.create` never
+ * resolves, never rejects, and never logs. Observed here as a session that sat
+ * for seventeen minutes on a 139MB encoder while the UI honestly reported
+ * "compiling" the whole time.
+ *
+ * LiquidAI's own WebGPU reference sets this to 1 before creating any session.
+ * It is not a performance knob for this workload — the tensor maths runs on the
+ * GPU, and the WASM side is glue.
+ *
+ * Set at module scope so it cannot be missed by a code path that creates a
+ * session without going through `createSession`.
+ */
+ort.env.wasm.numThreads = 1;
+
+/**
+ * How long a session may take to compile before we say something is wrong.
+ *
+ * Large graphs genuinely take tens of seconds on a laptop GPU, so this is not a
+ * failure threshold — nothing is aborted. It exists because a silent wait is
+ * indistinguishable from a hang, and that ambiguity cost a long debugging
+ * session.
+ */
+const SLOW_COMPILE_MS = 45_000;
+
 export const tensorFactory: TensorFactory = (type, data, dims) =>
   new ort.Tensor(type, data as never, dims as number[]) as unknown as TensorLike;
 
@@ -22,6 +51,19 @@ export const tensorFactory: TensorFactory = (type, data, dims) =>
  * at all.
  */
 export async function createSession(
+  graph: ArrayBuffer,
+  externalData: { path: string; data: ArrayBuffer }[],
+  onSlow?: (elapsedMs: number) => void,
+): Promise<SessionLike> {
+  const slow = setTimeout(() => onSlow?.(SLOW_COMPILE_MS), SLOW_COMPILE_MS);
+  try {
+    return await create(graph, externalData);
+  } finally {
+    clearTimeout(slow);
+  }
+}
+
+async function create(
   graph: ArrayBuffer,
   externalData: { path: string; data: ArrayBuffer }[],
 ): Promise<SessionLike> {
