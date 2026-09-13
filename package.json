@@ -33,7 +33,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "build:shared": "pnpm --filter @greenroom/shared build",
+    "build:shared": "pnpm --filter \"@greenroom/shared...\" build",
     "dev": "pnpm build:shared && pnpm --filter @greenroom/web dev",
     "typecheck": "pnpm build:shared && pnpm -r typecheck",
     "test": "pnpm build:shared && pnpm -r test",
