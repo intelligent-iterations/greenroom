@@ -117,8 +117,13 @@ describe('FolderAssetSource memory behaviour', () => {
       const create = handle.createWritable.bind(handle);
       handle.createWritable = async () => {
         const w = await create();
-        const write = w.write.bind(w);
-        (w as { write: (d: Uint8Array) => Promise<void> }).write = async (d: Uint8Array) => {
+        // Cast through the DOM's write signature: cross-origin isolation makes
+        // a Uint8Array's buffer ArrayBufferLike, which does not satisfy
+        // FileSystemWriteChunkType's ArrayBuffer constraint.
+        const write = w.write.bind(w) as (d: unknown) => Promise<void>;
+        (w as unknown as { write: (d: Uint8Array) => Promise<void> }).write = async (
+          d: Uint8Array,
+        ) => {
           writes.push(d.length);
           maxBufferedChunks = Math.max(maxBufferedChunks, d.length);
           return write(d);
