@@ -119,7 +119,15 @@ export class FolderAssetSource implements AssetSource {
       throw new Error(`${name}: HTTP ${response.status}`);
     }
 
-    const bytes = await this.#download(response, name, expected);
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await this.#downloadStreaming(response, name, expected);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.#step({ kind: 'failed', file: name, reason });
+      throw error;
+    }
+
     if (expected !== undefined && bytes.byteLength !== expected) {
       this.#step({
         kind: 'failed',
@@ -129,38 +137,114 @@ export class FolderAssetSource implements AssetSource {
       throw new Error(`${name} downloaded ${bytes.byteLength} bytes, expected ${expected}`);
     }
 
-    this.#step({ kind: 'saving', file: name });
-    await this.#writeFolder(name, bytes);
+    // Already written by the streaming path when a folder is available.
+    if (!this.#options.folder) await this.#writeFolder(name, bytes);
     return bytes;
   }
 
-  async #download(response: Response, name: string, expected?: number): Promise<ArrayBuffer> {
-    // Prefer the manifest over Content-Length: a CDN that omits the header, or
-    // a proxy that rewrites it, must not make the bar stop moving.
+  /**
+   * Stream the body to disk, then read it back once.
+   *
+   * The obvious implementation — collect every chunk, concatenate, return the
+   * buffer, write it — holds the file **twice** at its widest point. For the
+   * 1.16GB decoder weights that is 2.3GB of peak allocation before anything is
+   * saved, and on a machine with less headroom than that it does not fail. It
+   * swaps, and a download that is thrashing is indistinguishable from one that
+   * has hung. That is what "stuck downloading" was.
+   *
+   * Writing each chunk straight through keeps the peak at one chunk. Reading
+   * the finished file back costs the file once, which is unavoidable: ONNX
+   * Runtime takes external weights as an in-memory buffer.
+   */
+  async #downloadStreaming(
+    response: Response,
+    name: string,
+    expected?: number,
+  ): Promise<ArrayBuffer> {
     const declared = Number(response.headers.get('Content-Length') ?? 0) || undefined;
     const total = expected ?? declared;
     const reader = response.body?.getReader();
     if (!reader) return response.arrayBuffer();
 
-    const chunks: Uint8Array[] = [];
-    let loaded = 0;
-    for (;;) {
-      this.#throwIfAborted();
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      loaded += value.length;
-      this.#step({ kind: 'downloading', file: name, loaded, total: total ?? loaded });
-      this.#report({ file: name, loaded, ...(total !== undefined ? { total } : {}) });
+    const folder = this.#options.folder;
+    const temporary = `${name}.part`;
+    let writable: FileSystemWritableFileStream | undefined;
+    let handle: FileSystemFileHandle | undefined;
+
+    if (folder) {
+      try {
+        handle = await folder.getFileHandle(temporary, { create: true });
+        writable = await handle.createWritable();
+      } catch {
+        // No writable folder: fall back to buffering, which is correct but
+        // costs memory. Small files are fine; the large ones want the folder.
+        writable = undefined;
+      }
     }
 
-    const out = new Uint8Array(loaded);
-    let at = 0;
-    for (const chunk of chunks) {
-      out.set(chunk, at);
-      at += chunk.length;
+    const buffered: Uint8Array[] = [];
+    let loaded = 0;
+    let lastReport = 0;
+
+    try {
+      for (;;) {
+        this.#throwIfAborted();
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        if (writable) await writable.write(value);
+        else buffered.push(value);
+        loaded += value.length;
+
+        // Throttled. Reporting every chunk is ~18,000 updates for this file,
+        // each one a React render — enough on its own to make the tab stop
+        // responding, which also reads as stuck.
+        const now = performance.now();
+        if (now - lastReport > 120 || loaded === total) {
+          lastReport = now;
+          this.#step({ kind: 'downloading', file: name, loaded, total: total ?? loaded });
+          this.#report({ file: name, loaded, ...(total !== undefined ? { total } : {}) });
+        }
+      }
+    } catch (error) {
+      await writable?.close().catch(() => {});
+      if (folder) await folder.removeEntry(temporary).catch(() => {});
+      throw error;
     }
-    return out.buffer;
+
+    // A final report so the bar always reaches the end of this file.
+    this.#report({ file: name, loaded, ...(total !== undefined ? { total } : {}) });
+
+    if (!writable) {
+      const out = new Uint8Array(loaded);
+      let at = 0;
+      for (const chunk of buffered) {
+        out.set(chunk, at);
+        at += chunk.length;
+      }
+      return out.buffer;
+    }
+
+    await writable.close();
+    this.#step({ kind: 'saving', file: name });
+
+    const written = await handle!.getFile();
+    if (expected !== undefined && written.size !== expected) {
+      await folder!.removeEntry(temporary).catch(() => {});
+      throw new Error(`${name} downloaded ${written.size} bytes, expected ${expected}`);
+    }
+
+    const movable = handle as FileSystemFileHandle & { move?: (to: string) => Promise<void> };
+    if (!movable.move) {
+      // Without an atomic rename the file cannot be published safely, so it is
+      // returned but not kept — correct this run, downloaded again the next.
+      const bytes = await written.arrayBuffer();
+      await folder!.removeEntry(temporary).catch(() => {});
+      return bytes;
+    }
+
+    await movable.move(name);
+    return (await handle!.getFile()).arrayBuffer();
   }
 
   /** A folder hit must be the right size, not merely present and non-empty. */

@@ -79,6 +79,121 @@ describe('surveyFolder', () => {
   });
 });
 
+describe('FolderAssetSource memory behaviour', () => {
+  /**
+   * The bug that produced "stuck downloading".
+   *
+   * The first version collected every chunk and then allocated a second buffer
+   * the size of the whole file to concatenate them. For the 1.16GB decoder
+   * weights that is 2.3GB of peak allocation, which on a constrained machine
+   * does not fail — it swaps, and thrashing is indistinguishable from a hang.
+   */
+  it('streams to the folder instead of buffering the whole file', async () => {
+    const folder = new FakeDirectoryHandle();
+    let maxBufferedChunks = 0;
+
+    const chunkCount = 50;
+    const size = DECODER.bytes;
+    const per = Math.ceil(size / chunkCount);
+    let sent = 0;
+    const fetchImpl = vi.fn(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= size) return controller.close();
+          const n = Math.min(per, size - sent);
+          sent += n;
+          controller.enqueue(new Uint8Array(n));
+        },
+      });
+      return new Response(stream, { headers: { 'Content-Length': String(size) } });
+    }) as unknown as typeof fetch;
+
+    // Count writes: a streaming implementation writes many times, a buffering
+    // one writes once at the end with everything.
+    const writes: number[] = [];
+    const original = folder.getFileHandle.bind(folder);
+    folder.getFileHandle = async (name: string, options?: { create?: boolean }) => {
+      const handle = await original(name, options);
+      const create = handle.createWritable.bind(handle);
+      handle.createWritable = async () => {
+        const w = await create();
+        const write = w.write.bind(w);
+        (w as { write: (d: Uint8Array) => Promise<void> }).write = async (d: Uint8Array) => {
+          writes.push(d.length);
+          maxBufferedChunks = Math.max(maxBufferedChunks, d.length);
+          return write(d);
+        };
+        return w;
+      };
+      return handle;
+    };
+
+    const source = new FolderAssetSource({
+      repo: 'test/repo',
+      folder: folder as never,
+      createSession,
+      fetchImpl,
+    });
+
+    await source.bytes(DECODER.file);
+
+    // Many small writes, not one enormous one.
+    expect(writes.length).toBeGreaterThan(10);
+    expect(maxBufferedChunks).toBeLessThan(size / 10);
+    expect(folder.files.get(DECODER.file)?.size).toBe(size);
+  });
+
+  it('does not flood listeners with one update per chunk', async () => {
+    // ~18,000 React renders for a single file was enough on its own to make
+    // the tab stop responding.
+    const size = 4_000_000;
+    let sent = 0;
+    const fetchImpl = vi.fn(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= size) return controller.close();
+          sent += 4096;
+          controller.enqueue(new Uint8Array(4096));
+        },
+      });
+      return new Response(stream, { headers: { 'Content-Length': String(size) } });
+    }) as unknown as typeof fetch;
+
+    const source = new FolderAssetSource({ repo: 'test/repo', createSession, fetchImpl });
+    let updates = 0;
+    source.onProgress(() => (updates += 1));
+    await source.bytes('unmanifested.bin');
+
+    // ~977 chunks; throttling must cut this by an order of magnitude.
+    expect(updates).toBeLessThan(100);
+  });
+
+  it('removes the partial file when a download fails midway', async () => {
+    const folder = new FakeDirectoryHandle();
+    const fetchImpl = vi.fn(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(1000));
+          controller.error(new Error('connection lost'));
+        },
+      });
+      return new Response(stream, { headers: { 'Content-Length': '999999' } });
+    }) as unknown as typeof fetch;
+
+    const source = new FolderAssetSource({
+      repo: 'test/repo',
+      folder: folder as never,
+      createSession,
+      fetchImpl,
+    });
+
+    await expect(source.bytes(DECODER.file)).rejects.toThrow();
+    // Nothing left that a later session could mistake for a complete file.
+    expect([...folder.files.keys()]).not.toContain(DECODER.file);
+    expect([...folder.files.keys()].some((k) => k.endsWith('.part'))).toBe(false);
+  });
+});
+
 describe('FolderAssetSource', () => {
   it('downloads a file, validates its size, and saves it', async () => {
     const folder = new FakeDirectoryHandle();
