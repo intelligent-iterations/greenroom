@@ -155,10 +155,78 @@ describe('inverse STFT', () => {
   });
 
   it('produces the right number of samples', () => {
-    // (frames - 1) * hop + nFft
+    // (frames - 1) * hop, because half a window is trimmed from each end —
+    // torch.istft's `center=True`, which the reference uses.
     const frames = 4;
     const features = new Float32Array(frames * STFT_FEATURE_WIDTH);
-    expect(istft(features, frames)).toHaveLength((frames - 1) * 320 + 1280);
+    expect(istft(features, frames)).toHaveLength((frames - 1) * 320);
+  });
+
+  it('reads the two halves as magnitude and phase, not real and imaginary', () => {
+    // The layout the detokenizer actually emits. Measured on the real one, the
+    // first half has mean -1.88 over [-8.4, 4.7] — a log-magnitude — and the
+    // second is symmetric and unbounded, which is a phase.
+    //
+    // A single bin at a known magnitude and phase makes the difference
+    // checkable: read as real/imaginary the result would be flat and tiny,
+    // read as polar it is a cosine whose amplitude is exp(logMagnitude).
+    const frames = 6;
+    const logMagnitude = 0;
+    const features = new Float32Array(frames * STFT_FEATURE_WIDTH).fill(-30);
+    for (let f = 0; f < frames; f++) {
+      const base = f * STFT_FEATURE_WIDTH;
+      features[base + 4] = logMagnitude;
+      features[base + STFT_BINS + 4] = 0;
+    }
+
+    const out = istft(features, frames);
+    let peak = 0;
+    for (const v of out) peak = Math.max(peak, Math.abs(v));
+    // exp(0) = 1 at bin 4, spread over a 1280-point inverse: order 1e-3.
+    // Read as real/imaginary that bin would have been 0, and every other bin
+    // -30, giving a near-silent buffer.
+    expect(peak).toBeGreaterThan(1e-4);
+    expect(peak).toBeLessThan(1);
+  });
+
+  it('clips an implausible magnitude rather than letting it dominate', () => {
+    // exp() of a drifting log-magnitude is unbounded; the reference clips at
+    // 100. Without it one bin swamps the frame.
+    const frames = 4;
+    const wild = new Float32Array(frames * STFT_FEATURE_WIDTH).fill(-30);
+    const sane = new Float32Array(frames * STFT_FEATURE_WIDTH).fill(-30);
+    for (let f = 0; f < frames; f++) {
+      wild[f * STFT_FEATURE_WIDTH + 3] = 50; // exp(50) without a clip
+      sane[f * STFT_FEATURE_WIDTH + 3] = Math.log(100);
+    }
+    const peakOf = (a: Float32Array) => {
+      let p = 0;
+      for (const v of istft(a, frames)) p = Math.max(p, Math.abs(v));
+      return p;
+    };
+    expect(peakOf(wild)).toBeCloseTo(peakOf(sane), 5);
+  });
+
+  it('keeps a plausible frame inside the range audio has to live in', () => {
+    // The failure this pins: untrimmed, the edges are divided by a window
+    // taper approaching zero and a real frame peaked at 681 — for samples that
+    // must sit inside [-1, 1]. Measured against the real detokenizer, trimming
+    // brought the same frame to 0.24.
+    const frames = 12;
+    const features = new Float32Array(frames * STFT_FEATURE_WIDTH);
+    for (let f = 0; f < frames; f++) {
+      const base = f * STFT_FEATURE_WIDTH;
+      for (let k = 0; k < STFT_BINS; k++) {
+        // Around the real head's measured mean log-magnitude.
+        features[base + k] = -1.9 + Math.sin(k * 0.3) * 0.8;
+        features[base + STFT_BINS + k] = Math.sin(k * 1.7 + f) * 3;
+      }
+    }
+
+    let peak = 0;
+    for (const v of istft(features, frames)) peak = Math.max(peak, Math.abs(v));
+    expect(peak).toBeLessThan(1);
+    expect(peak).toBeGreaterThan(0);
   });
 
   it('returns empty for no frames', () => {

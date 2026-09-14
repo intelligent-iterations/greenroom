@@ -42,9 +42,28 @@ export function irfft(re: Float32Array, im: Float32Array, nFft: number): Float32
 }
 
 /**
+ * The largest magnitude the head is allowed to ask for.
+ *
+ * The reference clips the exponentiated magnitude at 100. Without it a single
+ * outlying bin — `exp` of a log-magnitude that drifted high — dominates the
+ * whole frame.
+ */
+const MAX_MAGNITUDE = 100;
+
+/**
  * [frames, 1282] to a waveform at 24kHz.
  *
- * `features` is the flattened detokenizer output for a single batch item.
+ * `features` is the flattened detokenizer output for a single batch item, and
+ * it is **not** a complex spectrum. The two halves are a log-magnitude and a
+ * phase, the layout a Vocos-style ISTFT head emits: the spectrum is
+ * `exp(a) * (cos(b) + i sin(b))`.
+ *
+ * This was read as [real, imaginary] instead, which is wrong in a way that
+ * still produces plausibly-shaped output — the right number of samples, at the
+ * right sample rate — so it would have survived any test that only counted
+ * samples. Measured on the real detokenizer, the first half has mean -1.88 over
+ * [-8.4, 4.7], which is a log-magnitude and nothing else; the second is
+ * symmetric about zero and unbounded, which is a raw phase angle.
  */
 export function istft(
   features: Float32Array,
@@ -66,8 +85,10 @@ export function istft(
   for (let f = 0; f < frames; f++) {
     const base = f * STFT_FEATURE_WIDTH;
     for (let k = 0; k < STFT_BINS; k++) {
-      re[k] = features[base + k] as number;
-      im[k] = features[base + STFT_BINS + k] as number;
+      const magnitude = Math.min(Math.exp(features[base + k] as number), MAX_MAGNITUDE);
+      const phase = features[base + STFT_BINS + k] as number;
+      re[k] = magnitude * Math.cos(phase);
+      im[k] = magnitude * Math.sin(phase);
     }
 
     const frame = irfft(re, im, nFft);
@@ -79,15 +100,21 @@ export function istft(
     }
   }
 
-  // Where no window overlapped, the normaliser is ~0; leaving those samples
-  // alone is correct, dividing by the epsilon would amplify numerical dust into
-  // clicks at the edges of every utterance.
   for (let i = 0; i < length; i++) {
     const n = norm[i] as number;
     if (n > 1e-8) out[i] = (out[i] as number) / n;
   }
 
-  return out;
+  // Trim half a window from each end — `center=True`, the convention the
+  // reference's STFT uses.
+  //
+  // Not cosmetic. At the very start and end only one window overlaps, and the
+  // Hann taper takes the denominator above towards zero there, so those samples
+  // are divided by almost nothing. Measured on a real frame: peak amplitude
+  // 681 untrimmed against 0.24 trimmed, for audio that must live inside
+  // [-1, 1]. Every chunk carried a burst of that at both ends.
+  const edge = nFft / 2;
+  return out.length > nFft ? out.slice(edge, out.length - edge) : new Float32Array(0);
 }
 
 /** Samples one audio frame becomes, for scheduling playback before the end. */

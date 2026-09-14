@@ -191,12 +191,36 @@ export async function generateAudioFrame(
     // Handed straight back: GroupQueryAttention writes into the cache it was
     // given, so these are the same buffers and copying them would only throw
     // the update away.
-    depthSlices = outputs['depth_slices'] as TensorLike;
-    pastKeys = outputs['new_keys'] as TensorLike;
-    pastValues = outputs['new_values'] as TensorLike;
+    //
+    // The ones being replaced are released first. Eight codebooks per frame
+    // and several hundred frames per reply is a few thousand runs, each
+    // producing four tensors; holding them all is what exhausted the heap
+    // partway through the first long turn.
+    const nextSlices = outputs['depth_slices'] as TensorLike;
+    const nextKeys = outputs['new_keys'] as TensorLike;
+    const nextValues = outputs['new_values'] as TensorLike;
+    release(outputs['logits'] as TensorLike);
+    if (depthSlices !== nextSlices) release(depthSlices);
+    if (pastKeys !== nextKeys) release(pastKeys);
+    if (pastValues !== nextValues) release(pastValues);
+    depthSlices = nextSlices;
+    pastKeys = nextKeys;
+    pastValues = nextValues;
   }
 
+  release(depthSlices);
+  release(pastKeys);
+  release(pastValues);
   return codes;
+}
+
+/** Free a tensor if its implementation can, ignoring one that cannot. */
+function release(tensor: TensorLike | undefined): void {
+  try {
+    tensor?.dispose?.();
+  } catch {
+    // Already released, or a double that has no buffer. Neither is a problem.
+  }
 }
 
 

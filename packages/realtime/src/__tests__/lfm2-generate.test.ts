@@ -346,3 +346,68 @@ describe('TextEmbeddings', () => {
     expect(table.lookup([3, 3])).toHaveLength(2 * HIDDEN_SIZE);
   });
 });
+
+describe('tensor lifetime', () => {
+  it('releases the depthformer tensors it stops using', async () => {
+    // Eight codebooks per frame and hundreds of frames per reply is a few
+    // thousand runs, each producing four tensors backed by GPU buffers. Held,
+    // they exhaust the heap partway through the first long turn and surface as
+    // `RuntimeError: memory access out of bounds`, nowhere near this loop.
+    let created = 0;
+    let disposed = 0;
+    const track = (t: TensorLike): TensorLike => {
+      created += 1;
+      return { ...t, dispose: () => { disposed += 1; } };
+    };
+
+    const depthformer: SessionLike = {
+      inputNames: [],
+      outputNames: [],
+      run: async () => {
+        const logits = new Float32Array(2049);
+        logits[7] = 100;
+        return {
+          logits: track(tensor('float32', logits, [1, 2049])),
+          depth_slices: track(
+            tensor('float32', new Float32Array(NUM_CODEBOOKS * 1024), [1, NUM_CODEBOOKS, 1024]),
+          ),
+          new_keys: track(tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32])),
+          new_values: track(tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32])),
+        };
+      },
+    };
+
+    await generateAudioFrame(depthformer, new Float32Array(HIDDEN_SIZE), factory, {
+      audioTemperature: 0,
+    });
+
+    // Four tensors per codebook step, all but the last frame's cache released
+    // inside the loop and that released at the end.
+    expect(created).toBe(NUM_CODEBOOKS * 4);
+    expect(disposed).toBe(created);
+  });
+
+  it('survives a session whose tensors cannot be disposed', async () => {
+    // A plain object from a test double, or a CPU tensor, has no dispose().
+    const depthformer: SessionLike = {
+      inputNames: [],
+      outputNames: [],
+      run: async () => {
+        const logits = new Float32Array(2049);
+        logits[3] = 100;
+        return {
+          logits: tensor('float32', logits, [1, 2049]),
+          depth_slices: tensor('float32', new Float32Array(NUM_CODEBOOKS * 1024), [1, NUM_CODEBOOKS, 1024]),
+          new_keys: tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32]),
+          new_values: tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32]),
+        };
+      },
+    };
+
+    const codes = await generateAudioFrame(depthformer, new Float32Array(HIDDEN_SIZE), factory, {
+      audioTemperature: 0,
+    });
+    expect(codes).toHaveLength(NUM_CODEBOOKS);
+  });
+});
+

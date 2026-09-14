@@ -16,6 +16,17 @@ export interface TensorLike {
   readonly type: string;
   readonly data: TensorData;
   readonly dims: readonly number[];
+  /**
+   * Release the tensor's backing buffer.
+   *
+   * Present on onnxruntime-web tensors and absent on a plain test double,
+   * hence optional. It matters more than it looks: with the WebGPU provider a
+   * tensor holds a GPU buffer, and one spoken turn runs the depthformer a few
+   * thousand times. Left undisposed, those accumulate until the heap gives out
+   * — reported as `RuntimeError: memory access out of bounds`, a long way from
+   * the loop that allocated them.
+   */
+  dispose?(): void;
 }
 
 export interface SessionLike {

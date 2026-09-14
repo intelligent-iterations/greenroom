@@ -434,6 +434,18 @@ export class LfmAudioStage implements DuplexVoiceStage {
         this.#options.tensor,
         (token) => this.#textEmbeddings?.lookup([token]) ?? new Float32Array(HIDDEN_SIZE),
         {
+          // A TTS turn should emit almost no text before switching to audio.
+          // What it emits instead is the evidence for why it did not.
+          onText: (token) => {
+            void Promise.resolve(this.#options.decode([token])).then((text) => {
+              this.#queue.push({
+                type: 'assistant_transcript',
+                text,
+                final: false,
+                at: performance.now(),
+              });
+            });
+          },
           onAudioFrame: (codes) => {
             frames.push(codes);
             if (frames.length % 4 === 0) void this.#emitAudio(frames.splice(0, 4));
