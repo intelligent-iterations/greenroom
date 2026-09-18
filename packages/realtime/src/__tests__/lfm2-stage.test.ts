@@ -92,7 +92,11 @@ const supporting: SessionLike = {
         NUM_CODEBOOKS,
         HIDDEN_SIZE,
       ]),
-      stft_features: tensor('float32', new Float32Array(1282), [1, 1, 1282]),
+      // 24 STFT frames, which is what the detokenizer returns for a
+      // four-frame chunk. One frame would trim to nothing — the ISTFT drops
+      // half a window from each end — and a fake that produces no samples
+      // would make the emit path look broken when it is not.
+      stft_features: tensor('float32', new Float32Array(24 * 1282), [1, 24, 1282]),
     };
   },
 };
@@ -496,4 +500,176 @@ describe('LfmAudioStage shutdown', () => {
     await stage.respond();
     expect(stage.busy).toBe(false);
   }, 20_000);
+});
+
+describe('LfmAudioStage session serialisation', () => {
+  it('never decodes audio while the depthformer is running', async () => {
+    // ONNX Runtime's WebGPU backend is not re-entrant: one device, one program
+    // manager, one command encoder. Decoding used to be started with `void`
+    // from inside onAudioFrame, so the detokenizer ran *while* the depthformer
+    // was mid-frame and the two clobbered each other's pipeline state:
+    //
+    //   Failed to execute 'setPipeline' on 'GPUComputePassEncoder':
+    //   parameter 1 is not of type 'GPUComputePipeline'
+    //
+    // Every shape of that detokenizer call succeeds on its own, which is what
+    // made it look like a shader problem rather than a concurrency one. The
+    // property worth pinning is simply that no two runs overlap.
+    let running: string | undefined;
+    const overlaps: string[] = [];
+
+    // The decode is made slow on purpose. Real GPU work takes tens of
+    // milliseconds, and a fake that returns immediately can miss an overlap
+    // simply by finishing first — which is a test that cannot fail, and worse
+    // than no test. At 60ms against 2ms steps, a fire-and-forget decode is
+    // certain to still be running when the next step begins.
+    const guard =
+      <T>(label: string, ms: number, run: () => Promise<T>) =>
+      async (): Promise<T> => {
+        if (running) overlaps.push(`${running} + ${label}`);
+        running = label;
+        try {
+          await tick(ms);
+          return await run();
+        } finally {
+          running = undefined;
+        }
+      };
+
+    const audioFrame = () => {
+      const logits = new Float32Array(2049);
+      logits[500] = 100;
+      return {
+        logits: tensor('float32', logits, [1, 2049]),
+        depth_slices: tensor('float32', new Float32Array(NUM_CODEBOOKS * 1024), [
+          1,
+          NUM_CODEBOOKS,
+          1024,
+        ]),
+        new_keys: tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32]),
+        new_values: tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32]),
+        audio_embeds: tensor('float32', new Float32Array(NUM_CODEBOOKS * HIDDEN_SIZE), [
+          1,
+          NUM_CODEBOOKS,
+          HIDDEN_SIZE,
+        ]),
+      };
+    };
+
+    const depthformer: SessionLike = {
+      inputNames: [],
+      outputNames: [],
+      run: guard('depthformer', 2, async () => audioFrame()),
+    };
+    const detokenizer: SessionLike = {
+      inputNames: [],
+      outputNames: [],
+      run: guard('detokenizer', 60, async () => ({
+        stft_features: tensor('float32', new Float32Array(24 * 1282), [1, 24, 1282]),
+      })),
+    };
+    const decoder: SessionLike = {
+      inputNames: ['inputs_embeds'],
+      outputNames: ['logits', 'hidden_states'],
+      run: guard('decoder', 2, async () => {
+        const logits = new Float32Array(TEXT_VOCAB);
+        logits[AUDIO_START_TOKEN] = 100;
+        return {
+          logits: tensor('float32', logits, [1, 1, TEXT_VOCAB]),
+          hidden_states: tensor('float32', new Float32Array(HIDDEN_SIZE), [1, 1, HIDDEN_SIZE]),
+        };
+      }),
+    };
+
+    const stage = new LfmAudioStage({
+      assets: {
+        session: async (name) => {
+          if (name.startsWith('decoder')) return decoder;
+          if (name.startsWith('vocoder_depthformer')) return depthformer;
+          if (name.startsWith('audio_detokenizer')) return detokenizer;
+          return supporting;
+        },
+        bytes: async () => embedTable(),
+      },
+      tensor: factory,
+      encode: () => [1, 2, 3],
+      decode: () => 'x',
+    });
+    await stage.load();
+    await stage.open();
+
+    // Long enough to cross several four-frame decode boundaries.
+    await stage.speak('hello', { maxSteps: 14 });
+
+    expect(overlaps).toEqual([]);
+    await stage.close();
+  }, 30_000);
+
+  it('still emits the audio it decoded', async () => {
+    // Serialising must not mean dropping: the frames still have to come out.
+    const chunks: number[] = [];
+    const decoder: SessionLike = {
+      inputNames: ['inputs_embeds'],
+      outputNames: ['logits', 'hidden_states'],
+      run: async () => {
+        const logits = new Float32Array(TEXT_VOCAB);
+        logits[AUDIO_START_TOKEN] = 100;
+        return {
+          logits: tensor('float32', logits, [1, 1, TEXT_VOCAB]),
+          hidden_states: tensor('float32', new Float32Array(HIDDEN_SIZE), [1, 1, HIDDEN_SIZE]),
+        };
+      },
+    };
+    // `supporting` ends the segment on its first frame, which is right for the
+    // tests that only need a turn to finish and useless here: a turn that
+    // produces no frames cannot demonstrate that frames come out.
+    const speaking: SessionLike = {
+      inputNames: [],
+      outputNames: [],
+      run: async () => {
+        const logits = new Float32Array(2049);
+        logits[500] = 100;
+        return {
+          logits: tensor('float32', logits, [1, 2049]),
+          depth_slices: tensor('float32', new Float32Array(NUM_CODEBOOKS * 1024), [
+            1,
+            NUM_CODEBOOKS,
+            1024,
+          ]),
+          new_keys: tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32]),
+          new_values: tensor('float32', new Float32Array(0), [6, 1, 8, 0, 32]),
+          audio_embeds: tensor('float32', new Float32Array(NUM_CODEBOOKS * HIDDEN_SIZE), [
+            1,
+            NUM_CODEBOOKS,
+            HIDDEN_SIZE,
+          ]),
+          stft_features: tensor('float32', new Float32Array(24 * 1282), [1, 24, 1282]),
+        };
+      },
+    };
+
+    const stage = new LfmAudioStage({
+      assets: {
+        session: async (name) => (name.startsWith('decoder') ? decoder : speaking),
+        bytes: async () => embedTable(),
+      },
+      tensor: factory,
+      encode: () => [1, 2, 3],
+      decode: () => 'x',
+    });
+    await stage.load();
+    await stage.open();
+
+    void (async () => {
+      for await (const event of stage.events()) {
+        if (event.type === 'assistant_audio') chunks.push(event.chunk.samples.length);
+      }
+    })();
+
+    await stage.speak('hello', { maxSteps: 14 });
+    await tick(20);
+
+    expect(chunks.length).toBeGreaterThan(0);
+    await stage.close();
+  }, 30_000);
 });

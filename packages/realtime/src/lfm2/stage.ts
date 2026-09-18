@@ -14,6 +14,7 @@ import { istft } from './istft.js';
 import { buildPrompt } from './tokens.js';
 import {
   FRAME_DURATION_MS,
+  AUDIO_START_TOKEN,
   INTERLEAVED_SYSTEM_PROMPT,
   TTS_SYSTEM_PROMPT,
   HIDDEN_SIZE,
@@ -101,6 +102,9 @@ const MAX_PENDING_SAMPLES = INPUT_SAMPLE_RATE * 30;
  */
 const releaseEventLoop = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Frames decoded together. 4 x 80ms is under the gap a listener notices. */
+const FRAMES_PER_CHUNK = 4;
 
 const GRAPHS = [
   'audio_encoder',
@@ -234,6 +238,15 @@ export class LfmAudioStage implements DuplexVoiceStage {
     }
   }
 
+  /** Input and output names of each loaded graph, for diagnostics. */
+  sessionNames(): Record<string, { inputs: string[]; outputs: string[] }> {
+    const out: Record<string, { inputs: string[]; outputs: string[] }> = {};
+    for (const [name, session] of this.#sessions) {
+      out[name] = { inputs: [...session.inputNames], outputs: [...session.outputNames] };
+    }
+    return out;
+  }
+
   /** True while a turn is generating. */
   get busy(): boolean {
     return this.#active !== undefined;
@@ -279,19 +292,15 @@ export class LfmAudioStage implements DuplexVoiceStage {
               });
             });
           },
+          // Collected, not decoded here. See #drain.
           onAudioFrame: (codes) => {
             frames.push(codes);
-            // Emitted in batches rather than per frame: one frame is 80ms and
-            // decoding each alone would run the detokenizer 12 times a second
-            // for no benefit. Every 4 frames is ~320ms, under the threshold
-            // where a listener hears a gap.
-            if (frames.length % 4 === 0) void this.#emitAudio(frames.splice(0, 4));
           },
           onDone: (summary) => this.#reportTurn(summary),
         },
         {
           signal: turn.signal,
-          yield: releaseEventLoop,
+          yield: () => this.#drain(frames),
           ...(this.#options.textTemperature !== undefined
             ? { textTemperature: this.#options.textTemperature }
             : {}),
@@ -352,7 +361,53 @@ export class LfmAudioStage implements DuplexVoiceStage {
     return { data, length: total };
   }
 
+  /**
+   * Release the event loop, and decode any audio that has piled up.
+   *
+   * Called from the generation loop between steps, which is the only moment
+   * nothing else is running — and that is the whole point.
+   *
+   * ONNX Runtime's WebGPU backend is not re-entrant: one device, one program
+   * manager, one command encoder. Decoding used to be started with `void` from
+   * inside `onAudioFrame`, so the detokenizer ran *while* the depthformer was
+   * mid-frame, and the two clobbered each other's pipeline state. The symptom
+   * names nothing useful —
+   *
+   *   Failed to execute 'setPipeline' on 'GPUComputePassEncoder':
+   *   parameter 1 is not of type 'GPUComputePipeline'
+   *
+   * — and every shape of that call works perfectly in isolation, which is what
+   * made it look like a shader bug rather than a concurrency one.
+   */
+  async #drain(frames: number[][]): Promise<void> {
+    await releaseEventLoop();
+    while (frames.length >= FRAMES_PER_CHUNK) {
+      await this.#emitAudio(frames.splice(0, FRAMES_PER_CHUNK));
+    }
+  }
+
+  /**
+   * Decode frames to samples and hand them to the caller.
+   *
+   * Every failure in here used to vanish. It is started with `void` from the
+   * generation loop — deliberately, so decoding does not stall the next frame
+   * — and an unhandled rejection in that position is silent. Generation would
+   * produce perfectly good audio codes and nothing would ever play, with
+   * nothing logged to say why.
+   */
   async #emitAudio(frames: number[][]): Promise<void> {
+    try {
+      await this.#decodeAndEmit(frames);
+    } catch (error) {
+      this.#queue.push({
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+        at: performance.now(),
+      });
+    }
+  }
+
+  async #decodeAndEmit(frames: number[][]): Promise<void> {
     if (frames.length === 0) return;
     const codes = new BigInt64Array(NUM_CODEBOOKS * frames.length);
     // The detokenizer wants [batch, codebook, time] — codebook-major. Writing
@@ -370,6 +425,13 @@ export class LfmAudioStage implements DuplexVoiceStage {
     const features = out['stft_features']?.data as Float32Array;
     const stftFrames = (out['stft_features']?.dims[1] ?? 0) as number;
     const samples = istft(features, stftFrames);
+
+    if (samples.length === 0) {
+      throw new Error(
+        `detokenizer produced ${stftFrames} stft frames from ${frames.length} audio frames, ` +
+          'which the ISTFT turned into no samples',
+      );
+    }
 
     this.#queue.push({
       type: 'assistant_audio',
@@ -413,10 +475,15 @@ export class LfmAudioStage implements DuplexVoiceStage {
     this.#resetCache();
 
     try {
+      // The assistant turn is opened *and* handed <|audio_start|>, so the
+      // model begins the reply already speaking. Left to choose, it answers in
+      // text and never switches — the ONNX decoder has no modality input, so
+      // the token stream is the only place to say so.
       const { prefix, suffix } = buildPrompt({ system, user: text });
       const ids = [
         ...(await this.#options.encode(prefix)),
         ...(await this.#options.encode(suffix)),
+        AUDIO_START_TOKEN,
       ];
       const embeds =
         this.#textEmbeddings?.lookup(ids) ?? new Float32Array(ids.length * HIDDEN_SIZE);
@@ -448,13 +515,13 @@ export class LfmAudioStage implements DuplexVoiceStage {
           },
           onAudioFrame: (codes) => {
             frames.push(codes);
-            if (frames.length % 4 === 0) void this.#emitAudio(frames.splice(0, 4));
           },
           onDone: (summary) => this.#reportTurn(summary),
         },
         {
           signal: turn.signal,
-          yield: releaseEventLoop,
+          yield: () => this.#drain(frames),
+          startInAudioMode: true,
           textTemperature: 0.7,
           audioTemperature: 0.7,
           ...(maxSteps !== undefined ? { maxSteps } : {}),

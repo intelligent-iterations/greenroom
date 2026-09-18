@@ -57,6 +57,17 @@ export interface GenerationOptions {
    * a worker thread, which does not need it, can leave it out.
    */
   yield?: () => Promise<void>;
+  /**
+   * Begin in audio mode rather than waiting for the model to switch.
+   *
+   * The reference's PyTorch path steers modality with a `modality_flag`
+   * tensor. The ONNX decoder has no such input — its only inputs are
+   * embeddings, a mask and the cache — so the one remaining way to say "speak"
+   * is to put <|audio_start|> in the prompt and start decoding audio after it.
+   * Without that the model simply answers in text and never switches, which is
+   * the entire reason this pipeline produced no sound.
+   */
+  startInAudioMode?: boolean;
   /** Greedy by default: text that wanders is worse than text that is dull. */
   textTemperature?: number;
   /** Audio wants sampling; greedy audio is flat and buzzy. */
@@ -246,7 +257,7 @@ export async function generate(
   const maxSteps = options.maxSteps ?? 300;
   let embeds = tensor('float32', promptEmbeds, [1, promptLength, HIDDEN_SIZE]);
   let total = promptLength;
-  let inAudioMode = false;
+  let inAudioMode = options.startInAudioMode ?? false;
   let frames = 0;
   let steps = 0;
 
